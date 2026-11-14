@@ -20,6 +20,8 @@ dependencies = [
 [dependency-groups]
 dev = [
     "black>=26.10.1",
+    "ipykernel>=7.4.0",
+    "jupytext>=1.19.6",
     "pre-commit>=4.7.0",
     "pytest>=9.2.0",
     "ruff>=0.17.5",
