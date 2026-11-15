@@ -1,0 +1,4 @@
+timestamp,nombre,features,modelo,cv_auc_mean,cv_auc_std,kaggle_score,notas
+2026-11-15T05:19:17+00:00,logreg_raw,10 columnas crudas (sin ingeniería),imputar + escalar + clf,0.69931,0.00569,,"baseline lineal, antes de feature engineering"
+2026-11-15T05:19:18+00:00,gbm_raw,10 columnas crudas (sin ingeniería),LGBMClassifier,0.86354,0.00229,0.87726,"piso de comparación, antes de feature engineering"
+2026-11-15T05:19:20+00:00,baseline_lightgbm,prepare() - 28 columnas,LGBMClassifier,0.86355,0.00242,0.87884,"piso de comparación, feature engineering inicial"
