@@ -118,7 +118,7 @@ repite información que ya entra al modelo con `debt_amount`.
 **Experimento:** comparar por AUC usar solo C, solo B o ambas (con la mediana
 global y A como referencia).
 
-## Escalado que vamos a usar
+## Escalado propuesto
 
 Solo para la regresión logística con regularización; los modelos de árboles no
 se escalan.

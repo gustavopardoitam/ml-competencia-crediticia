@@ -502,7 +502,15 @@ class WoEEncoder(BaseEstimator, TransformerMixin):
     def get_feature_names_out(
         self, input_features: list[str] | None = None
     ) -> np.ndarray:
-        """Nombres de las columnas de salida."""
+        """Devuelve los nombres de las columnas de salida.
+
+        Args:
+            input_features: Ignorado; se acepta por compatibilidad con
+                ``scikit-learn``.
+
+        Returns:
+            Arreglo con un nombre ``woe_<variable>`` por cada columna.
+        """
         return np.array([f"woe_{c}" for c in self.columns])
 
 

@@ -13,17 +13,18 @@
 # %% [markdown]
 # # 02 · EDA básico — Competencia crediticia
 #
-# Versión **paso a paso** del análisis exploratorio. Cada sección responde una
-# pregunta sencilla y explica qué se está viendo. Para un análisis más
-# avanzado consulta `01_eda.ipynb`.
+# Análisis exploratorio de datos (EDA) del conjunto de la competencia. Cada
+# sección plantea una pregunta, presenta la evidencia y cierra con una lectura
+# de los resultados. El documento es autocontenido: define sus términos y no
+# requiere otros notebooks para seguirse.
 #
 # **Objetivo del modelo:** predecir la probabilidad de que un cliente tenga
 # morosidad grave (90 días o más de atraso) en los próximos 2 años.
 # **Métrica:** AUC-ROC.
 #
-# **Qué se podrá experimentar en la competencia** (y dónde ayuda este EDA):
+# **Temas de experimentación de la competencia y sección que los cubre:**
 #
-# | Tema | Qué nos dice este EDA |
+# | Tema | Sección |
 # | --- | --- |
 # | Calidad de datos (duplicados) | Sección 1 |
 # | Valores faltantes y atípicos | Secciones 5, 7 y 10 |
@@ -36,8 +37,8 @@
 
 # %% [markdown]
 # ## 0. Preparación
-# Cargamos las librerías y los datos. Los archivos viven en `data/raw/`
-# (se descargan con `PYTHONPATH=src uv run python -m etl.download`).
+# Carga de librerías y datos. Los archivos se leen de `data/raw/` y se
+# descargan con `PYTHONPATH=src uv run python -m etl.download`.
 
 # %%
 from pathlib import Path
@@ -60,15 +61,15 @@ FEATS = [c for c in train.columns if c not in (TARGET, ID)]
 
 # %% [markdown]
 # ## 1. Ordenamiento y registros duplicados
-# Antes de explorar, revisamos la **calidad básica** del dataset: ¿hay
-# registros repetidos?
+# Antes de explorar se revisa la **calidad básica** del conjunto de datos:
+# ¿hay registros repetidos?
 #
 # **Criterio de eliminación:** solo se elimina una fila si su `Id` está
 # repetido (el mismo registro cargado dos veces). Las filas con `Id` distinto se
 # conservan aunque su contenido sea idéntico, porque pueden ser clientes
 # distintos con el mismo perfil; esas solo se **reportan**.
 #
-# Primero ordenamos los datos:
+# Primero se ordenan los datos:
 # - Por `Id`, para tener un orden estable y reproducible.
 # - Por todas las variables, para que los registros iguales queden juntos y se
 #   puedan revisar a simple vista.
@@ -82,7 +83,7 @@ train_ordenado = train.sort_values(FEATS + [TARGET], na_position="last")
 train_ordenado.head()
 
 # %% [markdown]
-# Revisamos tres tipos de duplicado:
+# Se revisan tres tipos de duplicado:
 #
 # | Tipo | Definición | Acción |
 # | --- | --- | --- |
@@ -173,14 +174,13 @@ pd.DataFrame(
 # ingreso reportado y con casi todas las variables en cero. Es posible que
 # algunos sean personas distintas con el mismo perfil, pero como tienen
 # exactamente la misma información y el mismo resultado, en el modelado pesan
-# doble. Como su `Id` es distinto, **se conservan**. Si más adelante se quiere
-# probar su efecto, se puede comparar el AUC con y sin ellos en la validación
-# cruzada.
+# doble. Como su `Id` es distinto, **se conservan**. Su efecto se puede medir
+# comparando el AUC con y sin ellos en la validación cruzada.
 
 # %% [markdown]
 # ### Limpieza y cifras de control
-# Eliminamos solo las filas con `Id` repetido (se conserva la primera) y
-# verificamos con cifras de control que se quitó exactamente lo esperado.
+# Se eliminan solo las filas con `Id` repetido (se conserva la primera) y se
+# verifica con cifras de control que se quitó exactamente lo esperado.
 
 # %%
 filas_antes = len(train)
@@ -263,8 +263,7 @@ train.head()
 
 # %% [markdown]
 # **Lectura:** `test` no trae la columna objetivo; es lo que el modelo debe
-# predecir. Solo podemos medir qué tan bien funciona con validación sobre
-# `train`.
+# predecir. El desempeño solo se puede medir con validación sobre `train`.
 
 # %% [markdown]
 # ## 4. Variable objetivo
@@ -325,17 +324,18 @@ faltantes[faltantes["n_faltantes"] > 0]
 train[FEATS].describe(percentiles=[0.01, 0.25, 0.5, 0.75, 0.99]).T.round(2)
 
 # %% [markdown]
-# **Cómo leer la tabla:** compara `50%` (mediana) con `mean` y con `max`.
-# - Si `max` es enorme frente al `99%`, hay **valores atípicos** (outliers).
+# **Lectura:** la comparación de `50%` (mediana) con `mean` y con `max`
+# permite detectar dos problemas.
+# - Si `max` es enorme frente al `99%`, hay **valores atípicos** (*outliers*).
 # - Si `mean` está muy lejos de la mediana, la distribución tiene cola larga.
 #
-# Cosas que suelen llamar la atención aquí: `age` con mínimo 0,
+# Destacan tres casos: `age` con mínimo 0,
 # `RevolvingUtilizationOfUnsecuredLines` muy por encima de 1 y las variables de
 # atraso con valores 96 o 98 (códigos especiales, no conteos reales).
 
 # %% [markdown]
 # ## 7. Valores atípicos
-# Revisamos tres casos concretos.
+# Se revisan tres casos concretos.
 
 # %%
 print("Edad menor a 18:", (train["age"] < 18).sum())
@@ -426,8 +426,8 @@ plt.show()
 
 # %% [markdown]
 # ## 10. Propuesta de preprocesamiento para la ingeniería de variables
-# Antes de construir el notebook de ingeniería de variables, decidimos **con
-# datos** dos cosas para cada variable:
+# Antes de la ingeniería de variables se definen, **con datos**, dos cosas
+# para cada variable:
 #
 # 1. Cómo tratar los valores faltantes y atípicos.
 # 2. Si necesita escalado y de qué tipo.
@@ -435,8 +435,8 @@ plt.show()
 # **Dos tipos de transformación:**
 # - **Fijas (deterministas):** no aprenden nada de los datos, por ejemplo
 #   recortar a 2 o convertir 96/98 en `NaN`. Se pueden aplicar antes de la
-#   validación cruzada. Ya están en `src/features/features.py` (rama
-#   `feature/features-separabilidad`).
+#   validación cruzada. Están en `clean_raw()` y `add_fixed_features()` de
+#   `src/features/engineering_jae.py`.
 # - **Aprendidas:** medianas, medias o desviaciones calculadas con los datos.
 #   Se ajustan **solo con el pliegue de entrenamiento** dentro de un
 #   `Pipeline`, para evitar fuga de datos.
@@ -664,8 +664,8 @@ print(
 #   el ingreso mediano sube de forma ordenada con el monto de deuda
 #   (derecha), con una correlación de Spearman de 0.50, la más alta de
 #   cualquier variable con el ingreso. Quien paga más deuda suele ganar más.
-# - No es una fórmula exacta: no conocemos la razón real de esas personas,
-#   así que solo podemos estimar un ingreso típico para su nivel de deuda.
+# - No es una fórmula exacta: la razón real de esos clientes no se conoce,
+#   así que solo se puede estimar un ingreso típico para su nivel de deuda.
 #
 # **c) ¿El ingreso cambia con la edad y con los créditos hipotecarios?**
 
@@ -706,17 +706,19 @@ tabla_edad_hipotecas.round(0)
 # %% [markdown]
 # **d) ¿Qué estrategia imputa mejor el ingreso?**
 #
-# Tomamos los clientes que **sí** tienen ingreso (> 0), les "ocultamos" el
-# 30 % y medimos qué tan cerca queda cada estrategia del valor real. Usamos
-# escala logarítmica porque el ingreso es muy asimétrico; menor error es mejor.
-# Todas las medianas y los cortes de cuantiles se calculan solo con el 70 % de
-# ajuste.
+# **Protocolo:** de los clientes que **sí** tienen ingreso (> 0) se reserva
+# el 30 %, se oculta su ingreso y se mide qué tan cerca queda cada estrategia
+# del valor real. El error se mide en escala logarítmica porque el ingreso es
+# muy asimétrico; menor error es mejor. Todas las medianas y los cortes de
+# cuantiles se calculan solo con el 70 % de ajuste.
 #
-# Además de las dos primeras propuestas (A: edad + créditos hipotecarios;
-# B: edad + decil del monto de deuda), probamos alternativas que **no usan ni
-# las hipotecas ni el monto de deuda**: edad combinada con la utilización de
-# la línea de crédito, con los dependientes y con el número de líneas de
-# crédito abiertas.
+# **Estrategias comparadas:**
+# - **A:** edad + número de créditos hipotecarios.
+# - **B:** edad + decil del monto mensual de deuda.
+# - Alternativas que **no usan ni las hipotecas ni el monto de deuda**: edad
+#   combinada con la utilización de la línea de crédito, con los dependientes
+#   y con el número de líneas de crédito abiertas.
+# - **C:** edad + líneas de crédito abiertas + dependientes.
 
 # %%
 from sklearn.model_selection import train_test_split
@@ -842,7 +844,15 @@ def error_imputacion(grupo: str | list[str] | None) -> float:
 
 
 def numero_de_grupos(grupo: str | list[str] | None) -> int:
-    """Cuenta los grupos que usa una estrategia (el nivel más fino si hay varios)."""
+    """Cuenta los grupos que usa una estrategia de imputación.
+
+    Args:
+        grupo: Columna que define los grupos; una lista indica niveles con
+            respaldo (se cuenta el más fino) y ``None`` es la mediana global.
+
+    Returns:
+        Número de grupos en los datos de ajuste.
+    """
     if grupo is None:
         return 1
     return int(ajuste[grupo[0] if isinstance(grupo, list) else grupo].nunique())
@@ -927,7 +937,7 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 #   hipotecas y la deuda (Spearman 0.31), y **siempre está informada**.
 # - **⭐ C: edad + líneas de crédito + dependientes** junta las dos señales y
 #   llega a 9.7 %, casi lo mismo que A (10.6 %).
-# - B sigue siendo la más precisa (16.1 %), pero es la única que depende del
+# - B es la más precisa (16.1 %), pero es la única que depende del
 #   monto de deuda.
 #
 # **Lectura de las gráficas:** dentro de cada grupo de edad las curvas quedan
@@ -946,7 +956,7 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 # > | **Grupos** | Edad × quintil de líneas de crédito abiertas × dependientes (0, 1, 2+) | Edad × decil del monto mensual de deuda | Edad × n.º de créditos hipotecarios |
 # > | **N.º de grupos** | 162 | 109 | 33 |
 # > | **Mejora vs mediana global** | 9.7 % | **16.1 %** | 10.6 % |
-# > | **Variable nueva** | `income_imp_age_lines_dep` | `income_imp_age_debt` | — (ya no se construye) |
+# > | **Variable nueva** | `income_imp_age_lines_dep` | `income_imp_age_debt` | — (no se construye) |
 # > | **Ventaja** | No usa hipotecas ni deuda; las líneas siempre están informadas; cada grupo se explica solo | La más precisa: el monto de deuda es el mejor predictor del ingreso (Spearman 0.50) | Fácil de explicar |
 # > | **Riesgo** | Algo menos precisa que A y claramente menos que B | Depende de la hipótesis de que, sin ingreso, `DebtRatio` es el monto de deuda; repite información que ya entra al modelo con `debt_amount` | Depende de una sola variable con pocos valores (0, 1, 2+) |
 # >
@@ -979,10 +989,10 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 #
 # En todos los casos se agrega el indicador `income_missing`.
 #
-# **¿Qué ingreso asignan C y B a los clientes sin ingreso?** Aplicamos C y B
-# (y, como referencia, A) a los 20,828 clientes sin ingreso. Aquí las medianas se
-# calculan con todos los clientes con ingreso solo para explorar; en el
-# notebook 03 se calcularán dentro de cada pliegue.
+# **¿Qué ingreso asignan C y B a los clientes sin ingreso?** Se aplican C y
+# B (y, como referencia, A) a los 20,828 clientes sin ingreso. Aquí las
+# medianas se calculan con todos los clientes con ingreso, solo para explorar;
+# en el notebook 03 se calculan dentro de cada pliegue.
 
 # %%
 conocidos = base.copy()
@@ -1291,7 +1301,7 @@ extremos.nlargest(8, "monto_deuda").round(2)
 #   el p99.9 es ~27,300. Algunos son inverosímiles (deber 478,451 al mes con un
 #   ingreso de 13,500): errores de captura. Con `log1p` no hace falta
 #   recortarlos; una alternativa a probar es recortar en el p99.9.
-# - **Hallazgo nuevo: el ingreso = 1 es un valor de relleno.** La franja
+# - **Hallazgo: el ingreso = 1 es un valor de relleno.** La franja
 #   vertical de la gráfica d (log10 ≈ 0.3) son **423 clientes con ingreso
 #   exactamente 1**. Su `DebtRatio` mediano es 625 y el 94 % supera 1: como
 #   con el ingreso faltante, ahí `DebtRatio` es el monto de la deuda. Su monto
@@ -1310,7 +1320,7 @@ extremos.nlargest(8, "monto_deuda").round(2)
 # 2. ¿El efecto es real o se debe a la edad o al ingreso?
 # 3. ¿Cómo aprovecharlo en la ingeniería de variables?
 #
-# Para medir la señal usamos el **Information Value (IV)**, que se explica a
+# La señal se mide con el **Information Value (IV)**, que se explica a
 # detalle en la sección 10.8 a.
 
 # %%
@@ -1373,7 +1383,7 @@ print(f"IV de NumberOfDependents: {information_value(dependientes, train[TARGET]
 # %% [markdown]
 # **¿Es efecto de los dependientes o de la edad y el ingreso?** Los
 # dependientes se relacionan con la edad (los adultos de 35 a 50 años tienen
-# más) y con el ingreso. Revisamos la morosidad **dentro** de cada grupo de
+# más) y con el ingreso. Se revisa la morosidad **dentro** de cada grupo de
 # edad y de cada cuartil de ingreso. Se ocultan las celdas con menos de 100
 # clientes.
 
@@ -1469,8 +1479,8 @@ plt.show()
 #   5.9 % sin dependientes a 7.2 % (1), 8.2 % (2), 9.1 % (3), 9.7 % (4) y
 #   10.1 % (5 o más). Los intervalos de confianza de 0, 1, 2 y 3 no se
 #   traslapan, así que la diferencia es real.
-# - **Los clientes sin el dato tienen el menor riesgo (4.8 %)**. Recordemos que
-#   son los mismos que no reportan ingreso (sección 10.3 a): el indicador
+# - **Los clientes sin el dato tienen el menor riesgo (4.8 %)**. Son los
+#   mismos que no reportan ingreso (sección 10.3 a): el indicador
 #   `dependents_missing` captura esa diferencia.
 # - **Por sí sola es una variable débil (IV 0.035)** porque el 58 % de los
 #   clientes no tiene dependientes.
@@ -1530,9 +1540,9 @@ print("Atraso máximo real (sin 96/98):", train.loc[~codigo, LATE].max().to_dict
 #   ponen en `NaN` con indicador `late_sentinel`; el atraso real máximo es 15.
 
 # %% [markdown]
-# ### 10.5 Escalado que vamos a usar
+# ### 10.5 Escalado propuesto
 # El escalado solo lo necesitan los modelos que usan coeficientes o
-# distancias, en nuestro caso la **regresión logística con regularización**
+# distancias, en este caso la **regresión logística con regularización**
 # (L1/L2 penaliza por igual a todos los coeficientes, así que las variables
 # deben estar en la misma escala). Los **modelos de árboles no se escalan**.
 #
@@ -1640,7 +1650,7 @@ plt.show()
 print(f"Componentes necesarios para llegar a 80 % de la varianza: {n_80} de {len(FEATS)}")
 
 # %% [markdown]
-# **Cómo leer las gráficas:**
+# **Guía de las gráficas:**
 # - **Barras:** cuánta varianza explica cada componente. La línea naranja es
 #   el acumulado: dónde cruza el 80 % indica cuántos componentes concentran
 #   casi todo el jugo en los datos.
@@ -1665,7 +1675,7 @@ print(f"Componentes necesarios para llegar a 80 % de la varianza: {n_80} de {len
 #   variables originales y las construidas.
 #
 # **¿El jugo sirve para predecir?** PCA mide **varianza**, no capacidad para
-# separar morosos. Lo comprobamos midiendo el AUC de cada componente por sí
+# separar morosos. Para comprobarlo se mide el AUC de cada componente por sí
 # solo:
 
 # %%
@@ -1695,9 +1705,9 @@ pd.concat([varianza["% varianza"], auc_componentes], axis=1).round(3).T
 
 # %% [markdown]
 # ### 10.8 Alternativas adicionales de ingeniería de variables
-# Además de lo que ya está en `src/features/features.py` (atrasos agregados,
-# `util_clip`, `debt_amount`, ingreso por dependiente, líneas no hipotecarias
-# e interacciones con utilización), evaluamos cinco alternativas más.
+# Además de la limpieza y de las variables básicas (atrasos agregados,
+# utilización recortada, monto de deuda e ingreso por dependiente), se
+# evalúan cinco alternativas.
 #
 # #### a) Agrupación con WoE e IV (*Weight of Evidence* / *Information Value*)
 # Es la técnica clásica del *scoring* crediticio:
@@ -1758,7 +1768,7 @@ plt.show()
 #   atrasos** (IV > 0.3). La edad tiene señal media. Ingreso, `DebtRatio`,
 #   líneas, hipotecas y dependientes son débiles por sí solas.
 # - El IV de la utilización (> 1) es muy alto. Aquí no es fuga de datos: el
-#   riesgo crece de forma muy marcada con la utilización, como vimos en la
+#   riesgo crece de forma muy marcada con la utilización, como muestra la
 #   sección 10.4.
 # - El WoE muestra la **curva** que una regresión logística con la variable
 #   cruda no puede capturar. El riesgo sube hasta 1–2 (WoE −2.2) y cambia de
@@ -1822,7 +1832,7 @@ plt.show()
 # %% [markdown]
 # #### c) Imputación del ingreso con un modelo y su trampa
 # En lugar de medianas, un modelo predice el ingreso con las demás
-# variables. Lo medimos con el mismo protocolo de la sección 10.3 d.
+# variables. Se mide con el mismo protocolo de la sección 10.3 d.
 
 # %%
 from sklearn.ensemble import HistGradientBoostingRegressor
@@ -1867,8 +1877,8 @@ comparacion_c.round(3)
 # `SplineTransformer` de `scikit-learn` convierte una variable en varias
 # curvas suaves, para que la regresión logística capte relaciones no lineales
 # sin discretizar. Candidatas: **utilización** (sube y cambia de tendencia) y
-# **edad** (el riesgo baja de forma continua). Es la alternativa a WoE para
-# quien prefiera no agrupar en rangos.
+# **edad** (el riesgo baja de forma continua). Es la alternativa a WoE cuando
+# no se quiere agrupar en rangos.
 #
 # #### e) Indicadores de perfil
 
@@ -1892,8 +1902,8 @@ pd.DataFrame(
 
 # %% [markdown]
 # **Lectura:** quien no usa sus líneas de crédito tiene menos de la mitad del
-# riesgo promedio, y el expediente delgado todavía menos. Es el mismo tipo de
-# perfil que vimos en los registros con contenido repetido (sección 1). Son
+# riesgo promedio, y el expediente delgado aún menos. Es el mismo tipo de
+# perfil de los registros con contenido repetido (sección 1). Son
 # indicadores baratos de construir y fáciles de interpretar.
 #
 # #### Resumen de alternativas adicionales
@@ -1910,9 +1920,9 @@ pd.DataFrame(
 # ### 10.9 Del EDA a la ingeniería de variables
 # Esta propuesta está implementada en `notebooks/03_ingenieria_variables_jae`
 # con el módulo `src/features/engineering_jae.py` (pruebas en
-# `tests/test_engineering_jae.py`). El trabajo es independiente del
-# `02_features_separabilidad` y del `features.py` de Gustavo, para comparar
-# hallazgos después.
+# `tests/test_engineering_jae.py`). Es una propuesta independiente de
+# `02_features_separabilidad` y de `src/features/features.py`, elaborados
+# por otro integrante del equipo, para comparar hallazgos después.
 #
 # | Decisión del EDA | Sección | En el módulo |
 # | --- | --- | --- |

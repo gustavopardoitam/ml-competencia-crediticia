@@ -216,17 +216,38 @@ def evaluar(
 
 
 def sin_emojis(textos: pd.Index | list[str]) -> list[str]:
-    """Quita ⭐ y 🔷 de las etiquetas (matplotlib no tiene esos glifos)."""
+    """Quita ⭐ y 🔷 de las etiquetas, porque matplotlib no tiene esos glifos.
+
+    Args:
+        textos: Etiquetas originales.
+
+    Returns:
+        Etiquetas sin los emojis.
+    """
     return [t.replace("⭐ ", "").replace("🔷 ", "") for t in textos]
 
 
 def logistica(config: FeatureConfig) -> Pipeline:
-    """Pipeline de preprocesamiento JAE + regresión logística."""
+    """Arma el pipeline de preprocesamiento JAE + regresión logística.
+
+    Args:
+        config: Configuración de la ingeniería de variables.
+
+    Returns:
+        Pipeline completo, sin ajustar.
+    """
     return make_pipeline(build_preprocessor(config), LogisticRegression(max_iter=2000))
 
 
 def arboles(config: FeatureConfig) -> Pipeline:
-    """Pipeline de preprocesamiento JAE + HistGradientBoosting."""
+    """Arma el pipeline de preprocesamiento JAE + HistGradientBoosting.
+
+    Args:
+        config: Configuración de la ingeniería de variables.
+
+    Returns:
+        Pipeline completo, sin ajustar.
+    """
     return make_pipeline(
         build_preprocessor(config), HistGradientBoostingClassifier(random_state=SEMILLA)
     )
@@ -259,7 +280,7 @@ def comparar(base: str, variantes: list[str]) -> pd.DataFrame:
 
 # %% [markdown]
 # ## 3. ¿Cuánto aporta la ingeniería de variables? (escalera)
-# Partimos de las variables **crudas** y agregamos un paso a la vez. Así se ve
+# Se parte de las variables **crudas** y se agrega un paso a la vez. Así se ve
 # qué decisión del EDA mueve realmente el AUC de la regresión logística.
 
 
