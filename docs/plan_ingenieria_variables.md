@@ -8,34 +8,40 @@ repetidos).
 
 Implementado en `notebooks/03_ingenieria_variables_jae.ipynb` con el módulo
 `src/features/engineering_jae.py` (pruebas en `tests/test_engineering_jae.py`).
-Diferencias contra este plan:
+El EDA, el módulo y el notebook 03 están alineados: la tabla de la sección
+10.9 del EDA indica dónde vive cada decisión en el módulo.
+
+Diferencias contra el plan original:
 
 - El WoE se implementó con un codificador propio (`WoEEncoder`) en lugar de
   `optbinning`, para no agregar dependencias.
 - Los atrasos se recortan a 6 (≈ p99.9).
+- La imputación del ingreso cambió: ⭐ C es la principal, 🔷 B la alternativa
+  y A quedó solo como experimento de referencia.
+- El ingreso = 1 se trata como ingreso 0: indicador `income_placeholder`,
+  fuera del ajuste de las medianas y con `DebtRatio` leído como monto.
+- Se agregó el ingreso por dependiente (`per_dependent_<ingreso>`).
 
 Resultados principales (AUC, validación cruzada de 5 pliegues):
-regresión logística 0.700 con variables crudas → **0.8565** con la propuesta;
-árboles 0.8622 → **0.8629**. El detalle y los hallazgos están en la sección 9
-del notebook.
+regresión logística 0.700 con variables crudas → **0.8568** con la propuesta;
+árboles 0.8622 → **0.8631**.
 
-**Pendientes (hallazgos posteriores al notebook 03):**
+- Las estrategias de imputación del ingreso empatan (global, A, B, C y C + B:
+  diferencias ≤ 0.0002).
+- El ingreso por dependiente no mejora la regresión logística (+0.0002 al
+  quitarlo) y aporta +0.0003 a los árboles. Se conserva en el dataset.
 
-- Tratar el ingreso = 1 como el ingreso = 0 (indicador propio y fuera del
-  ajuste de las medianas).
-- Agregar `income_per_dependent` = ingreso imputado / (1 + dependientes).
-- Implementar la estrategia ⭐ C de imputación del ingreso
-  (`income_imp_age_lines_dep`) en el módulo y en el notebook 03, que hoy
-  construyen A y B, y medir el AUC de usar solo C, solo B o ambas.
+El detalle y los hallazgos están en la sección 9 del notebook.
 
 ## Principios
 
 1. **Orden de aplicación:** limpieza fija → imputación → transformación →
    escalado.
 2. **Transformaciones fijas** (recortes con umbral fijo, códigos 96/98 a
-   `NaN`, indicadores): se aplican fuera de la validación cruzada. Base:
-   `clean()` y `add_features()` de `src/features/features.py` (rama
-   `feature/features-separabilidad`).
+   `NaN`, indicadores): se aplican fuera de la validación cruzada. Viven en
+   `clean_raw()` y `add_fixed_features()` de
+   `src/features/engineering_jae.py`, un módulo independiente del
+   `features.py` de la rama `feature/features-separabilidad`.
 3. **Transformaciones aprendidas** (medianas, escaladores, percentiles): se
    ajustan **solo con el pliegue de entrenamiento** dentro de un `Pipeline`.
    Nunca se ajustan sobre `train` completo ni sobre `test`.
@@ -134,13 +140,14 @@ se escalan.
 | `NumberOfTime60-89DaysPastDueNotWorse` | Igual | Igual | Igual | `StandardScaler` | Igual |
 | `NumberOfTimes90DaysLate` | Igual | Igual | Igual | `StandardScaler` | Igual |
 | `DebtRatio` | — | Separar en `debt_ratio_valid` (≤ 10) y `debt_amount` | `log1p` | `StandardScaler` | `RobustScaler` |
-| `MonthlyIncome` | ⭐ `income_imp_age_lines_dep` (estrategia C) + `income_missing` | Recortar a p99 (25,000) + `income_zero` | `log1p` | `StandardScaler` | 🔷 `income_imp_age_debt` (B) como segunda variable; solo C, solo B o ambas |
+| `MonthlyIncome` | ⭐ `income_imp_age_lines_dep` (estrategia C) + `income_missing` | Recortar a p99 (25,000) + `income_zero` + `income_placeholder` (ingreso = 1) | `log1p`; derivadas: ingreso disponible e ingreso por dependiente | `StandardScaler` | 🔷 `income_imp_age_debt` (B) como segunda variable; solo C, solo B o ambas |
 | `NumberOfOpenCreditLinesAndLoans` | — | Recortar a p99 (24) | — | `StandardScaler` | — |
 | `NumberRealEstateLoansOrLines` | — | Recortar a 5 | — | `StandardScaler` | — |
 | `NumberOfDependents` | Mediana por grupo de edad + `dependents_missing` | Recortar a 5 | — | `StandardScaler` | Imputar 0 |
 
 Grupos de edad: cortes `[0, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 120]`.
-Hipotecas para agrupar: `NumberRealEstateLoansOrLines` recortado a 2.
+Grupos de la estrategia C: quintiles de líneas abiertas (cortes aprendidos
+en el pliegue) y dependientes en 0, 1 o 2+; mínimo de 30 clientes por grupo.
 
 **Modelos de árboles:** misma limpieza fija e indicadores, sin escalado.
 Comparar imputación contra dejar `NaN` (XGBoost y
@@ -162,23 +169,28 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
 
 ## Entregables del notebook 03
 
-1. `src/features/`:
-   - Recortes faltantes en `features.py`: ingreso p99, líneas abiertas p99,
-     hipotecas 5, dependientes 5.
+1. `src/features/engineering_jae.py`:
+   - Limpieza y recortes fijos: utilización 2, atrasos 6, ingreso p99
+     (25,000), líneas abiertas p99 (24), hipotecas 5, dependientes 5.
+   - Indicadores: `late_sentinel`, `income_missing`, `income_zero`,
+     `income_placeholder` (ingreso = 1), `dependents_missing`, `util_gt1`.
    - `GroupMedianImputer`: transformador compatible con `scikit-learn`
      (`fit`/`transform`) que imputa la mediana por grupo, con respaldo a la
-     mediana global para grupos sin datos. Hoy se usa para
-     `income_imp_age_mortgage` (A), `income_imp_age_debt` (B) y dependientes
-     (edad). Falta extenderlo con niveles de respaldo y tamaño mínimo de
-     grupo para ⭐ `income_imp_age_lines_dep` (C).
-   - Variable fija `debt_amount` (ya existe en `features.py`).
+     mediana global para grupos sin datos. Con niveles de respaldo y
+     tamaño mínimo de grupo para ⭐ `income_imp_age_lines_dep` (C); sin ellos
+     para 🔷 `income_imp_age_debt` (B), `income_imp_age_mortgage` (A, solo de
+     referencia) y dependientes (edad).
+   - Variables fijas `debt_amount` y `debt_ratio_valid`.
    - Función que construye el `ColumnTransformer` según el tipo de modelo
      (lineal o de árboles).
-   - Variables nuevas: `disposable_income` (ingreso disponible),
-     `util_zero` y `thin_file`.
-   - Representación WoE con `optbinning` (agregar la dependencia).
-2. `tests/`: pruebas del imputador (no usa datos del pliegue de validación,
-   no deja `NaN`, respeta el respaldo global) y de los recortes.
+   - Variables nuevas: `disposable_<ingreso>` (ingreso disponible),
+     `per_dependent_<ingreso>` (ingreso por dependiente), `util_zero` y
+     `thin_file`.
+   - Representación WoE con el codificador propio `WoEEncoder`.
+2. `tests/test_engineering_jae.py`: pruebas del imputador (no usa datos del
+   pliegue de validación, no deja `NaN`, respeta el respaldo por niveles y el
+   global), del ingreso de relleno, de las variables derivadas y de los
+   recortes.
 3. Notebook con los experimentos:
    - Ingreso: solo ⭐ C, solo 🔷 B o ambas (mediana global y A como
      referencia).
@@ -187,7 +199,8 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
    - Atrasos: conteo transformado contra binarizado.
    - Representación para la regresión logística: escaladas contra WoE
      contra *splines*.
-   - Con y sin ingreso disponible e indicadores de perfil.
-   - Modelos: regresión logística L1/L2 y un modelo de árboles.
+   - Con y sin ingreso disponible, ingreso por dependiente e indicadores de
+     perfil.
+   - Modelos: regresión logística y un modelo de árboles.
 4. Cifras de control en cada paso: filas de entrada y salida, y cero `NaN`
    después de imputar (modelos lineales).

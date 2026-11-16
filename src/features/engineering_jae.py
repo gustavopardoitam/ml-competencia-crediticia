@@ -74,24 +74,32 @@ OPEN_LINES_MAX = 24
 REAL_ESTATE_MAX = 5
 DEPENDENTS_MAX = 5
 MORTGAGE_LEVEL_MAX = 2
+DEPENDENTS_LEVEL_MAX = 2
+# Ingreso = 1 es un valor de relleno (EDA, 10.3 e): se trata como ingreso 0
+INCOME_PLACEHOLDER_MAX = 1.0
+# Estrategia C de imputación del ingreso (EDA, 10.3 d)
+OPEN_LINES_BINS = 5
+MIN_GROUP_SIZE = 30
 
 # --- Nombres de variables construidas --------------------------------------
 LATE_SHORT = {LATE30: "late_30_59", LATE60: "late_60_89", LATE90: "late_90"}
-BASE_FLAGS = [
+CLEAN_FLAGS = [
     "late_sentinel",
     "income_missing",
     "income_zero",
+    "income_placeholder",
     "dependents_missing",
-    "util_gt1",
 ]
+BASE_FLAGS = [*CLEAN_FLAGS, "util_gt1"]
 PROFILE_FLAGS = ["util_zero", "thin_file"]
 INCOME_OUTPUTS = {
     "global": "income_imp_global",
     "A": "income_imp_age_mortgage",
     "B": "income_imp_age_debt",
+    "C": "income_imp_age_lines_dep",
 }
 
-IncomeStrategy = Literal["global", "A", "B", "AB"]
+IncomeStrategy = Literal["global", "A", "B", "C", "CB"]
 ScalerName = Literal["standard", "robust", "quantile"]
 LateMode = Literal["count", "binary"]
 Representation = Literal["scaled", "woe", "splines"]
@@ -119,7 +127,8 @@ def clean_raw(df: pd.DataFrame) -> pd.DataFrame:
 
     - Códigos 96/98 de atrasos → ``NaN`` con indicador ``late_sentinel``.
     - Edad menor a 18 → ``NaN``.
-    - Indicadores de ingreso faltante, ingreso cero y dependientes faltantes.
+    - Indicadores de ingreso faltante, ingreso cero, ingreso de relleno
+      (ingreso = 1) y dependientes faltantes.
 
     Args:
         df: Datos crudos con las columnas originales de la competencia.
@@ -138,12 +147,16 @@ def clean_raw(df: pd.DataFrame) -> pd.DataFrame:
     out[AGE] = out[AGE].where(out[AGE] >= MIN_ADULT_AGE)
     out["income_missing"] = out[INCOME].isna().astype(int)
     out["income_zero"] = (out[INCOME] == 0).astype(int)
+    placeholder = (out[INCOME] > 0) & (out[INCOME] <= INCOME_PLACEHOLDER_MAX)
+    out["income_placeholder"] = placeholder.astype(int)
     out["dependents_missing"] = out[DEPENDENTS].isna().astype(int)
     logger.info(
-        "Limpieza fija: %d filas, %d con códigos 96/98, %d edades inválidas",
+        "Limpieza fija: %d filas, %d con códigos 96/98, %d edades inválidas, "
+        "%d con ingreso de relleno",
         len(out),
         int(sentinel.sum()),
         int(out[AGE].isna().sum()),
+        int(placeholder.sum()),
     )
     return out
 
@@ -160,7 +173,7 @@ def add_fixed_features(df: pd.DataFrame) -> pd.DataFrame:
     Raises:
         ValueError: Si faltan columnas de la limpieza fija.
     """
-    _require_columns(df, RAW_FEATURES + BASE_FLAGS[:4], "add_fixed_features")
+    _require_columns(df, RAW_FEATURES + CLEAN_FLAGS, "add_fixed_features")
     out = df.copy()
     util = out[UTIL]
     out["util_gt1"] = (util > 1).astype(int)
@@ -183,8 +196,9 @@ def add_fixed_features(df: pd.DataFrame) -> pd.DataFrame:
         & (out[OPEN_LINES] <= 1)
     ).astype(int)
 
-    # Sin ingreso (o ingreso 0), DebtRatio es el monto mensual de deuda
-    no_income = out[INCOME].isna() | (out[INCOME] <= 0)
+    # Sin ingreso (faltante, 0 o el relleno 1), DebtRatio es el monto mensual
+    # de deuda y no una razón
+    no_income = out[INCOME].isna() | (out[INCOME] <= INCOME_PLACEHOLDER_MAX)
     out["debt_amount"] = out[DEBT_RATIO].where(no_income, out[DEBT_RATIO] * out[INCOME])
     out["debt_ratio_valid"] = (
         out[DEBT_RATIO].where(~no_income).clip(upper=DEBT_RATIO_VALID_MAX).fillna(0)
@@ -202,6 +216,10 @@ def add_fixed_features(df: pd.DataFrame) -> pd.DataFrame:
         .astype(int)
     )
     out["mortgage_level"] = out[REAL_ESTATE].clip(upper=MORTGAGE_LEVEL_MAX).astype(int)
+    # 0, 1 o 2+ dependientes; -1 si faltan (ese grupo usa el respaldo de C)
+    out["dependents_level"] = (
+        out[DEPENDENTS].clip(upper=DEPENDENTS_LEVEL_MAX).fillna(-1).astype(int)
+    )
     logger.info("Variables fijas agregadas: %d columnas en total", out.shape[1])
     return out
 
@@ -246,9 +264,15 @@ def quantile_edges(values: pd.Series, n_bins: int) -> np.ndarray:
 class GroupMedianImputer(BaseEstimator, TransformerMixin):
     """Imputa una columna con la mediana de su grupo, aprendida en ``fit``.
 
-    Los grupos se forman con ``group_cols`` y, opcionalmente, con los cuantiles
-    de ``binned_col`` (cortes aprendidos también en ``fit``). Si un grupo no
-    existe en el ajuste, se usa la mediana global.
+    La llave del grupo se arma, en este orden, con ``group_cols``, los
+    cuantiles de ``binned_col`` (cortes aprendidos también en ``fit``) y
+    ``detail_cols``. Un grupo solo se usa si tiene al menos
+    ``min_group_size`` valores en el ajuste.
+
+    Con ``fallback=True`` la imputación es jerárquica: si el grupo completo no
+    alcanza el mínimo (o no existe), se descarta la última parte de la llave y
+    se intenta con el grupo más general, y así hasta la primera parte. Al
+    final siempre queda la mediana global.
 
     Args:
         source_col: Columna con faltantes a imputar.
@@ -256,7 +280,12 @@ class GroupMedianImputer(BaseEstimator, TransformerMixin):
         group_cols: Columnas categóricas que definen los grupos.
         binned_col: Columna numérica que se corta en cuantiles para agrupar.
         n_bins: Número de cuantiles de ``binned_col``.
-        positive_only: Si es ``True``, solo los valores > 0 entran al ajuste.
+        detail_cols: Columnas categóricas que afinan el grupo; son las
+            primeras que se descartan en el respaldo.
+        fit_above: Si se indica, solo los valores mayores a este umbral entran
+            al ajuste (por ejemplo, 0 para ignorar ceros).
+        min_group_size: Valores mínimos para confiar en la mediana de un grupo.
+        fallback: Si es ``True``, usa el respaldo jerárquico.
     """
 
     def __init__(
@@ -266,27 +295,34 @@ class GroupMedianImputer(BaseEstimator, TransformerMixin):
         group_cols: tuple[str, ...] = (),
         binned_col: str | None = None,
         n_bins: int = 10,
-        positive_only: bool = False,
+        detail_cols: tuple[str, ...] = (),
+        fit_above: float | None = None,
+        min_group_size: int = 1,
+        fallback: bool = False,
     ) -> None:
         self.source_col = source_col
         self.output_col = output_col
         self.group_cols = group_cols
         self.binned_col = binned_col
         self.n_bins = n_bins
-        self.positive_only = positive_only
+        self.detail_cols = detail_cols
+        self.fit_above = fit_above
+        self.min_group_size = min_group_size
+        self.fallback = fallback
 
-    def _keys(self, X: pd.DataFrame) -> pd.Series:
-        """Construye la llave de grupo de cada fila."""
+    def _level_keys(self, X: pd.DataFrame) -> list[pd.Series]:
+        """Construye las llaves de grupo, del nivel más fino al más general."""
         parts = [X[c].astype(str) for c in self.group_cols]
         if self.binned_col is not None:
             bins = pd.cut(X[self.binned_col], self.bin_edges_, labels=False)
             parts.append(bins.astype("Int64").astype(str))
+        parts += [X[c].astype(str) for c in self.detail_cols]
         if not parts:
-            return pd.Series("todos", index=X.index)
-        key = parts[0]
+            return [pd.Series("todos", index=X.index)]
+        keys = [parts[0]]
         for part in parts[1:]:
-            key = key + "_" + part
-        return key
+            keys.append(keys[-1] + "_" + part)
+        return keys[::-1] if self.fallback else keys[-1:]
 
     def fit(self, X: pd.DataFrame, y: pd.Series | None = None) -> GroupMedianImputer:
         """Aprende las medianas por grupo.
@@ -301,20 +337,25 @@ class GroupMedianImputer(BaseEstimator, TransformerMixin):
         Raises:
             ValueError: Si faltan columnas o no hay valores para ajustar.
         """
-        cols = [self.source_col, *self.group_cols]
+        cols = [self.source_col, *self.group_cols, *self.detail_cols]
         if self.binned_col is not None:
             cols.append(self.binned_col)
         _require_columns(X, cols, type(self).__name__)
         source = X[self.source_col]
-        mask = source.notna() & (source > 0 if self.positive_only else True)
+        mask = source.notna()
+        if self.fit_above is not None:
+            mask &= source > self.fit_above
         if not mask.any():
             raise ValueError(
                 f"No hay valores para ajustar la imputación de {self.source_col}"
             )
         if self.binned_col is not None:
             self.bin_edges_ = quantile_edges(X.loc[mask, self.binned_col], self.n_bins)
-        keys = self._keys(X)
-        self.group_medians_ = source[mask].groupby(keys[mask]).median().to_dict()
+        self.level_medians_ = []
+        for keys in self._level_keys(X):
+            summary = source[mask].groupby(keys[mask]).agg(["median", "size"])
+            enough = summary["size"] >= self.min_group_size
+            self.level_medians_.append(summary.loc[enough, "median"].to_dict())
         self.global_median_ = float(source[mask].median())
         return self
 
@@ -327,14 +368,12 @@ class GroupMedianImputer(BaseEstimator, TransformerMixin):
         Returns:
             Copia de ``X`` con ``output_col`` sin faltantes.
         """
-        check_is_fitted(self, "group_medians_")
+        check_is_fitted(self, "level_medians_")
         out = X.copy()
-        imputed = (
-            self._keys(out)
-            .map(self.group_medians_)
-            .astype(float)
-            .fillna(self.global_median_)
-        )
+        imputed = pd.Series(np.nan, index=out.index)
+        for keys, medians in zip(self._level_keys(out), self.level_medians_):
+            imputed = imputed.fillna(keys.map(medians).astype(float))
+        imputed = imputed.fillna(self.global_median_)
         missing = out[self.source_col].isna()
         out[self.output_col] = out[self.source_col].where(~missing, imputed)
         logger.debug("%s: %d valores imputados", self.output_col, int(missing.sum()))
@@ -355,6 +394,23 @@ def add_disposable_income(df: pd.DataFrame, income_cols: list[str]) -> pd.DataFr
     out = df.copy()
     for col in income_cols:
         out[f"disposable_{col}"] = out[col] - out["debt_amount"]
+    return out
+
+
+def add_income_per_dependent(df: pd.DataFrame, income_cols: list[str]) -> pd.DataFrame:
+    """Agrega el ingreso por persona: ingreso / (1 + dependientes).
+
+    Args:
+        df: Datos con ``dependents`` y las columnas de ingreso indicadas.
+        income_cols: Columnas de ingreso a partir de las cuales se calcula.
+
+    Returns:
+        Copia con una columna ``per_dependent_<ingreso>`` por cada ingreso.
+    """
+    _require_columns(df, [*income_cols, "dependents"], "add_income_per_dependent")
+    out = df.copy()
+    for col in income_cols:
+        out[f"per_dependent_{col}"] = out[col] / (1 + out["dependents"])
     return out
 
 
@@ -455,50 +511,68 @@ class FeatureConfig:
     """Configuración de un experimento de ingeniería de variables.
 
     Attributes:
-        income_strategy: Imputación del ingreso: ``global``, ``A`` (edad +
-            hipotecas), ``B`` (edad + decil de deuda) o ``AB`` (ambas).
+        income_strategy: Imputación del ingreso: ``C`` (principal: edad +
+            líneas de crédito + dependientes, con respaldo), ``B``
+            (alternativa: edad + decil de deuda), ``CB`` (ambas), ``global`` o
+            ``A`` (descartada: edad + hipotecas; solo como referencia).
         scaler: Escalador para modelos lineales.
         late_mode: Atrasos como conteo transformado o como indicadores.
         representation: ``scaled`` (variables escaladas), ``woe`` o ``splines``.
         disposable_income: Si se agrega el ingreso disponible.
+        income_per_dependent: Si se agrega el ingreso por dependiente.
         profile_flags: Si se agregan ``util_zero`` y ``thin_file``.
         for_trees: Si el preprocesamiento es para modelos de árboles (sin
             escalado).
         impute_for_trees: En árboles, si se imputa o se dejan los ``NaN``.
     """
 
-    income_strategy: IncomeStrategy = "A"
+    income_strategy: IncomeStrategy = "C"
     scaler: ScalerName = "standard"
     late_mode: LateMode = "count"
     representation: Representation = "scaled"
     disposable_income: bool = True
+    income_per_dependent: bool = True
     profile_flags: bool = True
     for_trees: bool = False
     impute_for_trees: bool = True
 
 
+def _strategy_names(strategy: IncomeStrategy) -> list[str]:
+    """Separa una estrategia combinada (``CB``) en sus estrategias simples."""
+    return [strategy] if strategy == "global" else list(strategy)
+
+
 def _income_imputers(strategy: IncomeStrategy) -> list[tuple[str, GroupMedianImputer]]:
-    """Construye los imputadores de ingreso de la estrategia indicada."""
+    """Construye los imputadores de ingreso de la estrategia indicada.
+
+    En todos, el ingreso 0 y el ingreso de relleno (1) quedan fuera del ajuste.
+    """
+    common = {"source_col": "income_clip", "fit_above": INCOME_PLACEHOLDER_MAX}
     specs = {
-        "global": GroupMedianImputer(
-            "income_clip", INCOME_OUTPUTS["global"], positive_only=True
-        ),
+        "global": GroupMedianImputer(output_col=INCOME_OUTPUTS["global"], **common),
         "A": GroupMedianImputer(
-            "income_clip",
-            INCOME_OUTPUTS["A"],
+            output_col=INCOME_OUTPUTS["A"],
             group_cols=("age_group", "mortgage_level"),
-            positive_only=True,
+            **common,
         ),
         "B": GroupMedianImputer(
-            "income_clip",
-            INCOME_OUTPUTS["B"],
+            output_col=INCOME_OUTPUTS["B"],
             group_cols=("age_group",),
             binned_col="debt_amount",
-            positive_only=True,
+            **common,
+        ),
+        "C": GroupMedianImputer(
+            output_col=INCOME_OUTPUTS["C"],
+            group_cols=("age_group",),
+            binned_col="open_lines",
+            n_bins=OPEN_LINES_BINS,
+            detail_cols=("dependents_level",),
+            min_group_size=MIN_GROUP_SIZE,
+            fallback=True,
+            **common,
         ),
     }
-    names = ["A", "B"] if strategy == "AB" else [strategy]
-    return [(f"income_{n}", specs[n]) for n in names]
+    return [(f"income_{n}", specs[n]) for n in _strategy_names(strategy)]
 
 
 def income_columns(strategy: IncomeStrategy) -> list[str]:
@@ -510,8 +584,7 @@ def income_columns(strategy: IncomeStrategy) -> list[str]:
     Returns:
         Lista de columnas de ingreso imputado.
     """
-    names = ["A", "B"] if strategy == "AB" else [strategy]
-    return [INCOME_OUTPUTS[n] for n in names]
+    return [INCOME_OUTPUTS[n] for n in _strategy_names(strategy)]
 
 
 def _scaler(name: ScalerName) -> BaseEstimator:
@@ -525,6 +598,19 @@ def _scaler(name: ScalerName) -> BaseEstimator:
     raise ValueError(f"Escalador desconocido: {name}")
 
 
+def _imputes(config: FeatureConfig) -> bool:
+    """Indica si la configuración imputa el ingreso y los dependientes."""
+    return not config.for_trees or config.impute_for_trees
+
+
+def _model_incomes(config: FeatureConfig) -> list[str]:
+    """Columnas de ingreso que entran al modelo según la configuración."""
+    if _imputes(config):
+        return income_columns(config.income_strategy)
+    # Árboles sin imputar: ingreso con NaN; el modelo los maneja directamente
+    return ["income_clip"]
+
+
 def feature_groups(config: FeatureConfig) -> dict[str, list[str]]:
     """Agrupa las columnas finales según el tratamiento que reciben.
 
@@ -534,11 +620,14 @@ def feature_groups(config: FeatureConfig) -> dict[str, list[str]]:
     Returns:
         Diccionario con las listas ``log``, ``signed_log``, ``plain`` y ``flags``.
     """
-    incomes = income_columns(config.income_strategy)
+    incomes = _model_incomes(config)
     late_count = list(LATE_SHORT.values())
     late_binary = [f"{c}_any" for c in late_count]
+    per_dependent = (
+        [f"per_dependent_{c}" for c in incomes] if config.income_per_dependent else []
+    )
     groups = {
-        "log": [*incomes, "debt_amount", "debt_ratio_valid"],
+        "log": [*incomes, *per_dependent, "debt_amount", "debt_ratio_valid"],
         "signed_log": (
             [f"disposable_{c}" for c in incomes] if config.disposable_income else []
         ),
@@ -582,9 +671,8 @@ def build_preprocessor(config: FeatureConfig) -> Pipeline:
     Returns:
         ``Pipeline`` listo para combinarse con un modelo.
     """
-    impute = not config.for_trees or config.impute_for_trees
     steps: list[tuple[str, object]] = []
-    if impute:
+    if _imputes(config):
         steps += _income_imputers(config.income_strategy)
         steps.append(
             (
@@ -595,32 +683,16 @@ def build_preprocessor(config: FeatureConfig) -> Pipeline:
             )
         )
     groups = feature_groups(config)
-
-    if not impute:
-        # Árboles sin imputar: ingreso con NaN; el modelo los maneja directamente
-        incomes = income_columns(config.income_strategy)
-        groups["log"] = ["income_clip", *[c for c in groups["log"] if c not in incomes]]
-        groups["signed_log"] = []
-        if config.disposable_income:
+    incomes = _model_incomes(config)
+    derived = {
+        "disposable": (config.disposable_income, add_disposable_income),
+        "per_dependent": (config.income_per_dependent, add_income_per_dependent),
+    }
+    for name, (enabled, function) in derived.items():
+        if enabled:
             steps.append(
-                (
-                    "disposable",
-                    FunctionTransformer(
-                        add_disposable_income, kw_args={"income_cols": ["income_clip"]}
-                    ),
-                )
+                (name, FunctionTransformer(function, kw_args={"income_cols": incomes}))
             )
-            groups["signed_log"] = ["disposable_income_clip"]
-    elif config.disposable_income:
-        steps.append(
-            (
-                "disposable",
-                FunctionTransformer(
-                    add_disposable_income,
-                    kw_args={"income_cols": income_columns(config.income_strategy)},
-                ),
-            )
-        )
 
     if config.for_trees:
         columns = [c for cols in groups.values() for c in cols] + [
@@ -653,6 +725,8 @@ def build_preprocessor(config: FeatureConfig) -> Pipeline:
         ]
         if config.disposable_income:
             woe_cols.append(groups["signed_log"][0])
+        if config.income_per_dependent:
+            woe_cols.append(f"per_dependent_{incomes[0]}")
         steps.append(
             (
                 "final",

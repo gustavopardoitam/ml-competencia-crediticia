@@ -960,9 +960,10 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 # > - La diferencia con A es de un punto (9.7 % contra 10.6 %), y ninguna
 # >   mediana adivina bien el ingreso de una persona: aun B deja un error
 # >   grande.
-# > - En el notebook 03 las estrategias de imputación **empataron en AUC**. La
-# >   precisión de la imputación no decide el modelo, así que conviene elegir
-# >   por robustez y facilidad de explicación.
+# > - En el notebook 03 las estrategias de imputación **empatan en AUC**
+# >   (global, A, B, C y C + B: diferencias ≤ 0.0002). La precisión de la
+# >   imputación no decide el modelo, así que conviene elegir por robustez y
+# >   facilidad de explicación.
 # > - C no depende de la hipótesis sobre `DebtRatio` ni del monto de deuda, que
 # >   ya entra al modelo por su cuenta (`debt_amount` e ingreso disponible).
 # >
@@ -1297,7 +1298,8 @@ extremos.nlargest(8, "monto_deuda").round(2)
 #   queda bien calculado (`DebtRatio × 1`), pero su "ingreso" no es real y
 #   distorsiona el ingreso disponible (1 − deuda). **Propuesta:** tratar el
 #   ingreso = 1 igual que el ingreso = 0 (indicador propio y excluirlo al
-#   aprender las medianas de imputación).
+#   aprender las medianas de imputación). En el módulo es el indicador
+#   `income_placeholder`.
 
 # %% [markdown]
 # **f) Influencia de los dependientes económicos**
@@ -1489,9 +1491,12 @@ plt.show()
 #
 # **Propuesta para la ingeniería de variables:**
 # - Conservar `dependents` (recortado a 5) y `dependents_missing`.
-# - **Agregar `income_per_dependent`** = ingreso imputado / (1 + dependientes).
-#   El notebook 03 todavía no la incluye; Gustavo sí la tiene en su
-#   `features.py`.
+# - **Agregar el ingreso por dependiente** = ingreso imputado /
+#   (1 + dependientes). En el módulo es `per_dependent_<ingreso>`, una columna
+#   por cada variable de ingreso imputado. **Resultado en el notebook 03:** no
+#   mejora la regresión logística (+0.0002 de AUC al quitarla) y aporta muy
+#   poco a los árboles (+0.0003). Su buen IV no se traduce en AUC porque el
+#   modelo ya tiene el ingreso y los dependientes por separado.
 # - Para modelos lineales, probar la interacción joven × dependientes; los
 #   árboles la encuentran solos.
 
@@ -1551,7 +1556,7 @@ print("Atraso máximo real (sin 96/98):", train.loc[~codigo, LATE].max().to_dict
 # | `NumberOfTime60-89DaysPastDueNotWorse` | 95 % ceros; códigos 96/98 | Igual que arriba | Igual que arriba | Igual que arriba | `StandardScaler` | Igual que arriba |
 # | `NumberOfTimes90DaysLate` | 94 % ceros; códigos 96/98 | Igual que arriba | Igual que arriba | Igual que arriba | `StandardScaler` | Igual que arriba |
 # | `DebtRatio` | Es un **monto** cuando falta el ingreso | — | Separar en `debt_ratio_valid` (≤ 10) y `debt_amount` | `log1p` a ambas | `StandardScaler` | `RobustScaler` |
-# | `MonthlyIncome` | 19.8 % faltante; 1,143 en 0; muy disperso (CV 2.3) | ⭐ `income_imp_age_lines_dep` (estrategia C: edad + líneas de crédito + dependientes, con respaldo) + `income_missing` | Recortar a p99 (25,000) + `income_zero` | `log1p` | `StandardScaler` | 🔷 `income_imp_age_debt` (estrategia B: edad + decil de deuda) como segunda variable; usar solo C, solo B o ambas |
+# | `MonthlyIncome` | 19.8 % faltante; 1,143 en 0; muy disperso (CV 2.3) | ⭐ `income_imp_age_lines_dep` (estrategia C: edad + líneas de crédito + dependientes, con respaldo) + `income_missing` | Recortar a p99 (25,000) + `income_zero` + `income_placeholder` (ingreso = 1) | `log1p`; derivadas: ingreso disponible e ingreso por dependiente | `StandardScaler` | 🔷 `income_imp_age_debt` (estrategia B: edad + decil de deuda) como segunda variable; usar solo C, solo B o ambas |
 # | `NumberOfOpenCreditLinesAndLoans` | Asimetría moderada (1.2) | — | Recortar a p99 (24) | — | `StandardScaler` | — |
 # | `NumberRealEstateLoansOrLines` | Máximo 54 contra p99 de 4 | — | Recortar a 5 | — | `StandardScaler` | — |
 # | `NumberOfDependents` | 2.6 % faltante (siempre junto con ingreso) | Mediana por grupo de edad (0 o 1) + `dependents_missing` | Recortar a 5 | — | `StandardScaler` | Imputar 0 (la moda) |
@@ -1768,9 +1773,10 @@ plt.show()
 # - **Da una selección de variables justificable** con el IV.
 # - **Es fácil de explicar.**
 #
-# En el notebook 03 se recomienda `optbinning`, que busca cortes óptimos y
-# monótonos. Los cortes y el WoE se aprenden **dentro de cada pliegue**, porque
-# usan la variable objetivo.
+# En el notebook 03 se usa un codificador propio (`WoEEncoder`, con cortes
+# por cuantiles) para no agregar dependencias; `optbinning`, que busca cortes
+# óptimos y monótonos, queda como mejora posible. Los cortes y el WoE se
+# aprenden **dentro de cada pliegue**, porque usan la variable objetivo.
 
 # %% [markdown]
 # #### b) Ingreso disponible (capacidad de pago)
@@ -1901,50 +1907,48 @@ pd.DataFrame(
 # | e) Indicadores de perfil | Utilización 0 y expediente delgado: menos de la mitad del riesgo | Experimento secundario (muy barato) |
 
 # %% [markdown]
-# ### 10.9 Preparación del notebook de ingeniería de variables
-# Propuesta para `notebooks/03_ingenieria_variables` (el número `02` ya lo usa
-# `02_features_separabilidad` de Gustavo):
+# ### 10.9 Del EDA a la ingeniería de variables
+# Esta propuesta está implementada en `notebooks/03_ingenieria_variables_jae`
+# con el módulo `src/features/engineering_jae.py` (pruebas en
+# `tests/test_engineering_jae.py`). El trabajo es independiente del
+# `02_features_separabilidad` y del `features.py` de Gustavo, para comparar
+# hallazgos después.
 #
-# 1. **Limpieza fija:** reutilizar `clean()` y `add_features()` de
-#    `src/features/features.py`, y agregar los recortes de la tabla 10.6 que
-#    aún no están (ingreso p99, líneas abiertas p99, hipotecas 5,
-#    dependientes 5).
-# 2. **Imputador por grupos:** transformador de `scikit-learn` (con
-#    `fit`/`transform`) que aprende la mediana de cada grupo **solo con el
-#    pliegue de entrenamiento**, con respaldo a la mediana global. Va en
-#    `src/features/` con sus pruebas. Se usa así:
-#    - ⭐ `income_imp_age_lines_dep` (estrategia C): ingreso por edad +
-#      quintil de líneas de crédito abiertas + dependientes, con respaldo a
-#      edad + líneas y luego a edad cuando el grupo tiene menos de 30
-#      clientes. Los cortes de los quintiles también se aprenden en el
-#      pliegue. **Pendiente de implementar** en el módulo y en el notebook 03,
-#      que hoy construyen A y B.
-#    - 🔷 `income_imp_age_debt` (estrategia B): ingreso por edad + decil del
-#      monto mensual de deuda. Ya está implementada.
-#    - `income_imp_age_mortgage` (A): descartada; queda solo como referencia.
-#    - `NumberOfDependents`: por edad.
-# 3. **`ColumnTransformer`** con dos ramas: variables continuas
-#    (imputar → `log1p` → `StandardScaler`) e indicadores (sin cambio).
-# 4. **Alternativas adicionales (sección 10.8):**
-#    - **WoE / IV** con `optbinning` como enfoque paralelo para la regresión
-#      logística (cortes y WoE aprendidos en cada pliegue).
-#    - **Ingreso disponible** (`ingreso − debt_amount`) como variable nueva,
-#      calculado con el ingreso imputado cuando falta.
-#    - Indicadores `util_zero` y `thin_file`; *splines* para utilización y
-#      edad.
-# 5. **Experimentos** con validación cruzada estratificada de 5 pliegues,
-#    semilla 42 y AUC-ROC:
-#    - Ingreso: solo ⭐ C, solo 🔷 B o **ambas variables** (con mediana
-#      global y A como referencia).
-#    - Escalado: `StandardScaler` contra `RobustScaler` contra
-#      `QuantileTransformer`.
-#    - Atrasos: conteo transformado contra binarizado.
-#    - Representación para la regresión logística: variables escaladas
-#      contra WoE contra *splines*.
-#    - Con y sin ingreso disponible e indicadores de perfil.
-#    - Modelos: regresión logística L1/L2 y un modelo de árboles.
-# 6. **Cifras de control:** filas de entrada y salida, y cero `NaN` después de
-#    imputar.
+# | Decisión del EDA | Sección | En el módulo |
+# | --- | --- | --- |
+# | Códigos 96/98 → `NaN` + indicador | 10.4 | `clean_raw`: `late_sentinel` |
+# | Edad < 18 → `NaN` | 10.4 | `clean_raw` |
+# | Indicadores de ingreso faltante, 0 y de relleno (= 1) | 10.3 e, 10.4 | `income_missing`, `income_zero`, `income_placeholder` |
+# | Recortes: utilización 2, atrasos 6, ingreso 25,000, líneas 24, hipotecas 5, dependientes 5 | 10.6 | `add_fixed_features` |
+# | `DebtRatio` separado en razón válida y monto de deuda | 10.3 b, e | `debt_ratio_valid`, `debt_amount` |
+# | ⭐ C: ingreso por edad + quintil de líneas + dependientes, con respaldo y mínimo de 30 clientes | 10.3 d | `GroupMedianImputer` → `income_imp_age_lines_dep` |
+# | 🔷 B: ingreso por edad + decil del monto de deuda | 10.3 d | `GroupMedianImputer` → `income_imp_age_debt` |
+# | A: edad + hipotecas (descartada) | 10.3 d | Solo como experimento de referencia |
+# | Ingreso 0 y de relleno fuera del ajuste de las medianas | 10.3 e | `fit_above` del imputador |
+# | Dependientes: mediana por grupo de edad | 10.6 | `GroupMedianImputer` |
+# | Ingreso disponible | 10.8 b | `disposable_<ingreso>` |
+# | Ingreso por dependiente | 10.3 f | `per_dependent_<ingreso>` |
+# | Indicadores de perfil | 10.8 e | `util_zero`, `thin_file` |
+# | WoE / IV y *splines* | 10.8 a, d | `WoEEncoder` propio (sin `optbinning`) y `SplineTransformer` |
+# | `log1p` + `StandardScaler`; alternativas `RobustScaler` y `QuantileTransformer` | 10.5 | `build_preprocessor` |
+#
+# **Experimentos del notebook 03** (validación cruzada estratificada de 5
+# pliegues, semilla 42, AUC-ROC; todo lo aprendido se ajusta dentro del
+# pliegue):
+# - Ingreso: solo ⭐ C, solo 🔷 B o **ambas variables** (con mediana global y
+#   A como referencia).
+# - Escalado: `StandardScaler` contra `RobustScaler` contra
+#   `QuantileTransformer`.
+# - Atrasos: conteo transformado contra binarizado.
+# - Representación para la regresión logística: variables escaladas contra
+#   WoE contra *splines*.
+# - Con y sin ingreso disponible, ingreso por dependiente e indicadores de
+#   perfil.
+# - Modelos: regresión logística y un modelo de árboles.
+#
+# **Nota:** en este EDA las medianas de la sección 10.3 d se exploran con los
+# clientes de ingreso > 0. El módulo además deja fuera el ingreso = 1 (423
+# clientes), por lo que sus cifras difieren muy poco de las de aquí.
 #
 # El detalle queda en `docs/plan_ingenieria_variables.md`.
 
@@ -1960,8 +1964,8 @@ pd.DataFrame(
 # | Ingreso muy disperso (CV 2.3, máximo 120 veces el p99) | Recortar a p99 + `log1p` (sección 10.2) |
 # | `DebtRatio` es un monto cuando falta el ingreso (siempre está informado) | Separar en razón válida y monto de deuda; el monto ayuda a inferir el ingreso |
 # | Monto de deuda: muy disperso (CV 2.1), relación en U con la morosidad | `log1p`; vale más combinado con el ingreso (sección 10.3 e) |
-# | Más dependientes, más riesgo (5.9 % → 10.1 %), sobre todo en jóvenes e ingresos bajos | Agregar ingreso por dependiente (IV 0.125) (sección 10.3 f) |
-# | 423 clientes con ingreso = 1 (valor de relleno, no ingreso real) | Tratarlo como ingreso = 0: indicador propio y fuera del ajuste de la imputación |
+# | Más dependientes, más riesgo (5.9 % → 10.1 %), sobre todo en jóvenes e ingresos bajos | Agregar ingreso por dependiente, `per_dependent_<ingreso>` (IV 0.125) (sección 10.3 f) |
+# | 423 clientes con ingreso = 1 (valor de relleno, no ingreso real) | Tratarlo como ingreso = 0: indicador propio (`income_placeholder`) y fuera del ajuste de la imputación |
 # | PCA: el jugo en los datos se reparte en varios componentes | Ver sección 10.7 |
 # | Utilización y atrasos concentran la señal (IV > 0.3) | WoE / IV como enfoque paralelo (sección 10.8) |
 # | Ingreso disponible: IV casi el doble que el ingreso | Variable nueva (sección 10.8) |
