@@ -24,6 +24,9 @@ del notebook.
 - Tratar el ingreso = 1 como el ingreso = 0 (indicador propio y fuera del
   ajuste de las medianas).
 - Agregar `income_per_dependent` = ingreso imputado / (1 + dependientes).
+- Implementar la estrategia ⭐ C de imputación del ingreso
+  (`income_imp_age_lines_dep`) en el módulo y en el notebook 03, que hoy
+  construyen A y B, y medir el AUC de usar solo C, solo B o ambas.
 
 ## Principios
 
@@ -56,34 +59,58 @@ del notebook.
 | Ingreso = 1 es un valor de relleno | 423 clientes; `DebtRatio` mediano 625, 94 % > 1 | 10.3 e |
 | El jugo en los datos está repartido | 7 de 10 componentes para el 80 %; PC1 (riesgo) explica 19.8 % y logra AUC 0.82 solo | 10.7 |
 
-## Imputación del ingreso: dos estrategias → dos variables de ingreso
+## Imputación del ingreso: ⭐ C (principal) y 🔷 B (alternativa)
+
+Se buscaron alternativas a las dos primeras propuestas que no usan ni las
+hipotecas ni el monto de deuda (sección 10.3 d del EDA). Resultado: C queda
+como principal, B se conserva como alternativa y A se descarta.
 
 | Estrategia | Grupos | Error (MAE en log) | Mejora vs global |
 | --- | --- | --- | --- |
 | Mediana global (línea base) | 1 | 0.577 | — |
 | Mediana por grupo de edad | 11 | 0.543 | 5.9 % |
-| **⭐ A: edad + n.º de créditos hipotecarios** | 33 | **0.515** | **10.6 %** |
+| Edad + utilización de la línea de crédito (quintil) | 55 | 0.538 | 6.7 % |
+| Edad + dependientes (0, 1, 2+) | 33 | 0.535 | 7.3 % |
+| Edad + n.º de líneas de crédito abiertas (quintil) | 55 | 0.527 | 8.6 % |
+| **⭐ C: edad + líneas de crédito + dependientes** | 162 | **0.521** | **9.7 %** |
+| A (descartada): edad + n.º de créditos hipotecarios | 33 | 0.515 | 10.6 % |
 | Mediana por decil del monto de deuda | 10 | 0.498 | 13.7 % |
-| **🔷 B: edad + decil del monto mensual de deuda** | 109 | **0.484** | **16.1 %** |
+| **🔷 B (alternativa): edad + decil del monto mensual de deuda** | 109 | **0.484** | **16.1 %** |
 
-Se construyen **las dos** como variables del dataset:
+**⭐ Estrategia C → `income_imp_age_lines_dep`.** Imputación con respaldo:
 
-| Variable | Estrategia | Ventaja | Riesgo |
-| --- | --- | --- | --- |
-| ⭐ `income_imp_age_mortgage` | A (principal) | Fácil de explicar; variables siempre informadas | Imputa con menos precisión |
-| 🔷 `income_imp_age_debt` | B (alternativa) | Imputa mejor; el monto de deuda es el mejor predictor del ingreso (Spearman 0.50) | Depende de que, sin ingreso, `DebtRatio` sea el monto de deuda |
+1. Mediana del grupo edad × quintil de líneas abiertas × dependientes
+   (0, 1, 2+), si el grupo tiene al menos 30 clientes con ingreso.
+2. Si no (o si faltan los dependientes), mediana de edad × líneas.
+3. Si tampoco, mediana del grupo de edad y, al final, mediana global.
+
+Por qué C como principal aunque no sea la más precisa:
+
+- Queda a un punto de A (9.7 % contra 10.6 %) y las estrategias de imputación
+  empataron en AUC en el notebook 03: la precisión de la imputación no decide
+  el modelo.
+- No depende de la hipótesis sobre `DebtRatio` ni del monto de deuda, que ya
+  entra al modelo como `debt_amount` e ingreso disponible.
+- Las líneas de crédito siempre están informadas (Spearman 0.31 con el
+  ingreso). La utilización casi no ayuda (Spearman −0.09).
+
+Aplicada a los 20,828 clientes sin ingreso: el 86.6 % se imputa con el grupo
+completo y el 13.4 % (sin dependientes informados) con edad × líneas. La
+mediana imputada es 5,000 (A: 5,416) y su Spearman con A y con B es 0.65: es
+una variable distinta.
 
 Monto mensual de deuda (`debt_amount`, transformación fija):
 `DebtRatio × MonthlyIncome` si el ingreso es > 0; `DebtRatio` tal cual si
 falta el ingreso o es 0.
 
-Aplicadas a los 20,828 clientes sin ingreso, A y B tienen Spearman 0.84 y
-difieren más de 30 % en el 11.9 % de los casos: B aporta información que A
-no tiene. B está más repartida (1,200 a 11,359) y se parece más a la forma
-del ingreso real. Ambas llevan el indicador `income_missing`.
+**🔷 Estrategia B → `income_imp_age_debt`.** Se conserva como segunda
+variable de ingreso: es la que mejor imputa (16.1 %), la hipótesis sobre
+`DebtRatio` está bien respaldada (sección 10.3 b) y se parece poco a C
+(Spearman 0.65), así que puede aportar información distinta. Su riesgo es que
+repite información que ya entra al modelo con `debt_amount`.
 
-**Experimento:** comparar por AUC usar solo A, solo B o ambas (la
-regularización L1/L2 maneja la correlación entre ellas).
+**Experimento:** comparar por AUC usar solo C, solo B o ambas (con la mediana
+global y A como referencia).
 
 ## Escalado que vamos a usar
 
@@ -107,7 +134,7 @@ se escalan.
 | `NumberOfTime60-89DaysPastDueNotWorse` | Igual | Igual | Igual | `StandardScaler` | Igual |
 | `NumberOfTimes90DaysLate` | Igual | Igual | Igual | `StandardScaler` | Igual |
 | `DebtRatio` | — | Separar en `debt_ratio_valid` (≤ 10) y `debt_amount` | `log1p` | `StandardScaler` | `RobustScaler` |
-| `MonthlyIncome` | **Dos variables:** ⭐ `income_imp_age_mortgage` y 🔷 `income_imp_age_debt` + `income_missing` | Recortar a p99 (25,000) + `income_zero` | `log1p` a ambas | `StandardScaler` | Solo A, solo B o ambas |
+| `MonthlyIncome` | ⭐ `income_imp_age_lines_dep` (estrategia C) + `income_missing` | Recortar a p99 (25,000) + `income_zero` | `log1p` | `StandardScaler` | 🔷 `income_imp_age_debt` (B) como segunda variable; solo C, solo B o ambas |
 | `NumberOfOpenCreditLinesAndLoans` | — | Recortar a p99 (24) | — | `StandardScaler` | — |
 | `NumberRealEstateLoansOrLines` | — | Recortar a 5 | — | `StandardScaler` | — |
 | `NumberOfDependents` | Mediana por grupo de edad + `dependents_missing` | Recortar a 5 | — | `StandardScaler` | Imputar 0 |
@@ -140,10 +167,10 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
      hipotecas 5, dependientes 5.
    - `GroupMedianImputer`: transformador compatible con `scikit-learn`
      (`fit`/`transform`) que imputa la mediana por grupo, con respaldo a la
-     mediana global para grupos sin datos. Se usa para ⭐
-     `income_imp_age_mortgage` (edad + hipotecas), 🔷 `income_imp_age_debt`
-     (edad + decil de deuda, con cortes aprendidos en el pliegue) y
-     dependientes (edad).
+     mediana global para grupos sin datos. Hoy se usa para
+     `income_imp_age_mortgage` (A), `income_imp_age_debt` (B) y dependientes
+     (edad). Falta extenderlo con niveles de respaldo y tamaño mínimo de
+     grupo para ⭐ `income_imp_age_lines_dep` (C).
    - Variable fija `debt_amount` (ya existe en `features.py`).
    - Función que construye el `ColumnTransformer` según el tipo de modelo
      (lineal o de árboles).
@@ -153,8 +180,8 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
 2. `tests/`: pruebas del imputador (no usa datos del pliegue de validación,
    no deja `NaN`, respeta el respaldo global) y de los recortes.
 3. Notebook con los experimentos:
-   - Ingreso: solo ⭐ A, solo 🔷 B o ambas (mediana global como línea
-     base).
+   - Ingreso: solo ⭐ C, solo 🔷 B o ambas (mediana global y A como
+     referencia).
    - Escalado: `StandardScaler` contra `RobustScaler` contra
      `QuantileTransformer`.
    - Atrasos: conteo transformado contra binarizado.
