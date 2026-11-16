@@ -1,0 +1,106 @@
+"""Pruebas de la validación cruzada con predicciones OOF (src/evaluation/oof_jae.py)."""
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
+
+from evaluation.log import read_log
+from evaluation.oof_jae import (
+    evaluar_modelo,
+    registrar_en_bitacora,
+    tabla_pliegues,
+)
+
+
+@pytest.fixture
+def datos() -> tuple[pd.DataFrame, pd.Series]:
+    """Datos sintéticos con señal: el objetivo depende de ``x1``."""
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"x1": rng.normal(size=600), "x2": rng.normal(size=600)})
+    y = pd.Series((X["x1"] + rng.normal(scale=1.0, size=600) > 1).astype(int))
+    return X, y
+
+
+@pytest.fixture
+def cv() -> StratifiedKFold:
+    """Partición pequeña y reproducible."""
+    return StratifiedKFold(n_splits=3, shuffle=True, random_state=1)
+
+
+def test_oof_cubre_todas_las_filas(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    resultado = evaluar_modelo(LogisticRegression(), X, y, "logistica", cv=cv)
+    assert not np.isnan(resultado.oof).any()
+    assert len(resultado.auc_folds) == 3
+    assert 0.5 < resultado.auc_oof <= 1.0
+    assert resultado.auc_train >= resultado.auc_media - 0.05
+
+
+def test_cada_pliegue_usa_un_clon_nuevo(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    modelo = make_pipeline(StandardScaler(), LogisticRegression())
+    evaluar_modelo(modelo, X, y, "pipeline", cv=cv)
+    # El modelo original no se ajusta: cada pliegue trabaja con un clon
+    assert not hasattr(modelo[-1], "coef_")
+
+
+def test_early_stopping_registra_arboles_por_pliegue(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    modelo = make_pipeline(
+        StandardScaler(),
+        XGBClassifier(n_estimators=500, learning_rate=0.3, max_depth=2, random_state=0),
+    )
+    resultado = evaluar_modelo(modelo, X, y, "xgb", cv=cv, early_stopping_rounds=10)
+    assert len(resultado.n_arboles) == 3
+    assert all(1 <= n <= 500 for n in resultado.n_arboles)
+
+
+def test_early_stopping_falla_con_modelos_sin_soporte(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    with pytest.raises((ValueError, TypeError)):
+        evaluar_modelo(
+            LogisticRegression(), X, y, "logistica", cv=cv, early_stopping_rounds=5
+        )
+
+
+def test_valida_objetivo_binario(datos: tuple[pd.DataFrame, pd.Series]) -> None:
+    X, _ = datos
+    with pytest.raises(ValueError, match="binario"):
+        evaluar_modelo(LogisticRegression(), X, pd.Series([2] * len(X)), "x")
+
+
+def test_tabla_de_pliegues_incluye_promedio_y_desviacion(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    tabla = tabla_pliegues(evaluar_modelo(LogisticRegression(), X, y, "lr", cv=cv))
+    assert list(tabla.index[-2:]) == ["promedio", "desv"]
+    assert tabla.loc["promedio", "AUC validación"] == pytest.approx(
+        tabla.iloc[:3]["AUC validación"].mean()
+    )
+
+
+def test_registrar_reemplaza_el_experimento_repetido(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold, tmp_path: Path
+) -> None:
+    X, y = datos
+    bitacora = tmp_path / "experiments.csv"
+    resultado = evaluar_modelo(LogisticRegression(), X, y, "jae_prueba", cv=cv)
+    registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
+    registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
+    assert (read_log(bitacora)["nombre"] == "jae_prueba").sum() == 1
