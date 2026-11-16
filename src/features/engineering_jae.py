@@ -99,7 +99,7 @@ INCOME_OUTPUTS = {
     "C": "income_imp_age_lines_dep",
 }
 
-IncomeStrategy = Literal["global", "A", "B", "C", "CB"]
+IncomeStrategy = Literal["global", "A", "B", "C", "BC"]
 ScalerName = Literal["standard", "robust", "quantile"]
 LateMode = Literal["count", "binary"]
 Representation = Literal["scaled", "woe", "splines"]
@@ -519,10 +519,10 @@ class FeatureConfig:
     """Configuración de un experimento de ingeniería de variables.
 
     Attributes:
-        income_strategy: Imputación del ingreso: ``C`` (principal: edad +
-            líneas de crédito + dependientes, con respaldo), ``B``
-            (alternativa: edad + decil de deuda), ``CB`` (ambas), ``global`` o
-            ``A`` (descartada: edad + hipotecas; solo como referencia).
+        income_strategy: Imputación del ingreso: ``B`` (principal: edad +
+            decil del monto de deuda), ``C`` (alternativa: edad + líneas de
+            crédito + dependientes, con respaldo), ``BC`` (ambas), ``global``
+            o ``A`` (descartada: edad + hipotecas; solo como referencia).
         scaler: Escalador para modelos lineales.
         late_mode: Atrasos como conteo transformado o como indicadores.
         representation: ``scaled`` (variables escaladas), ``woe`` o ``splines``.
@@ -534,7 +534,7 @@ class FeatureConfig:
         impute_for_trees: En árboles, si se imputa o se dejan los ``NaN``.
     """
 
-    income_strategy: IncomeStrategy = "C"
+    income_strategy: IncomeStrategy = "B"
     scaler: ScalerName = "standard"
     late_mode: LateMode = "count"
     representation: Representation = "scaled"
@@ -546,7 +546,7 @@ class FeatureConfig:
 
 
 def _strategy_names(strategy: IncomeStrategy) -> list[str]:
-    """Separa una estrategia combinada (``CB``) en sus estrategias simples."""
+    """Separa una estrategia combinada (``BC``) en sus estrategias simples."""
     return [strategy] if strategy == "global" else list(strategy)
 
 

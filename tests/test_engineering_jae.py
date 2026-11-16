@@ -288,17 +288,18 @@ def test_ingreso_por_dependiente() -> None:
     assert out["per_dependent_ingreso"].tolist() == [6000.0, 2000.0]
 
 
-def test_la_estrategia_principal_es_c() -> None:
+def test_la_estrategia_principal_es_b() -> None:
     config = FeatureConfig()
-    assert config.income_strategy == "C"
+    assert config.income_strategy == "B"
     out = build_preprocessor(replace(config, for_trees=True))
-    assert "income_C" in out.named_steps
+    assert "income_B" in out.named_steps
+    assert "income_C" not in out.named_steps
 
 
-def test_estrategia_cb_produce_las_dos_variables_de_ingreso(
+def test_estrategia_bc_produce_las_dos_variables_de_ingreso(
     raw: pd.DataFrame,
 ) -> None:
-    config = FeatureConfig(for_trees=True, income_strategy="CB")
+    config = FeatureConfig(for_trees=True, income_strategy="BC")
     out = build_preprocessor(config).fit_transform(prepare_fixed(raw))
     for columna in ("income_imp_age_lines_dep", "income_imp_age_debt"):
         assert out[columna].notna().all()
@@ -311,7 +312,8 @@ def test_estrategia_cb_produce_las_dos_variables_de_ingreso(
     "config",
     [
         FeatureConfig(),
-        FeatureConfig(income_strategy="CB", late_mode="binary"),
+        FeatureConfig(income_strategy="BC", late_mode="binary"),
+        FeatureConfig(income_strategy="C"),
         FeatureConfig(income_strategy="A", income_per_dependent=False),
         FeatureConfig(income_strategy="global", scaler="robust"),
         FeatureConfig(representation="woe"),
@@ -334,5 +336,5 @@ def test_preprocesador_de_arboles_sin_imputar_conserva_faltantes(
     config = FeatureConfig(for_trees=True, impute_for_trees=False)
     out = build_preprocessor(config).fit_transform(prepare_fixed(raw))
     assert out["income_clip"].isna().sum() == 1
-    assert "income_imp_age_lines_dep" not in out.columns
+    assert "income_imp_age_debt" not in out.columns
     assert "per_dependent_income_clip" in out.columns

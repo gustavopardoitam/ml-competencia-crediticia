@@ -171,8 +171,8 @@ CATALOGO = {
     "debt_amount": "Monto mensual de deuda (razón × ingreso, o DebtRatio si no hay ingreso)",
     "debt_ratio_valid": "DebtRatio solo con ingreso > 1, recortado a 10 (0 si no aplica)",
     "income_clip": "Ingreso recortado a 25,000 (con faltantes)",
-    "income_imp_age_lines_dep": "⭐ C: ingreso imputado por edad + quintil de líneas de crédito + dependientes (con respaldo)",
-    "income_imp_age_debt": "🔷 B: ingreso imputado por edad + decil del monto de deuda",
+    "income_imp_age_debt": "⭐ B: ingreso imputado por edad + decil del monto de deuda",
+    "income_imp_age_lines_dep": "🔷 C: ingreso imputado por edad + quintil de líneas de crédito + dependientes (con respaldo)",
     "income_imp_age_mortgage": "A (descartada): ingreso imputado por edad + n.º de créditos hipotecarios; solo como referencia",
     "disposable_<ingreso>": "Ingreso disponible = ingreso imputado − monto de deuda",
     "per_dependent_<ingreso>": "Ingreso por dependiente = ingreso imputado / (1 + dependientes)",
@@ -389,7 +389,7 @@ escalera = {
         plain=["util_clip", AGE, "open_lines", "real_estate", "dependents"],
         flags=INDICADORES_BASE,
     ),
-    "6. + imputación ⭐ C, ingresos derivados y perfil (propuesta)": logistica(
+    "6. + imputación ⭐ B, ingresos derivados y perfil (propuesta)": logistica(
         FeatureConfig()
     ),
 }
@@ -436,8 +436,8 @@ plt.show()
 #   etc.).
 # - Separar `DebtRatio` casi no mueve el AUC de la regresión logística
 #   (+0.0002), pero es necesario para calcular el monto de deuda, la
-#   imputación 🔷 B y el ingreso disponible.
-# - `log1p` aporta +0.005 (en los 5 pliegues) y la propuesta completa +0.0006
+#   imputación ⭐ B y el ingreso disponible.
+# - `log1p` aporta +0.005 (en los 5 pliegues) y la propuesta completa +0.0005
 #   más (en 4 de 5).
 # - **Total: +0.157 de AUC; el 96 % viene de los dos primeros pasos de
 #   limpieza.**
@@ -449,7 +449,7 @@ plt.show()
 
 # %%
 BASE = FeatureConfig()
-NOMBRE_BASE = "base: ⭐ C · Standard · conteo · escaladas · derivados · perfil"
+NOMBRE_BASE = "base: ⭐ B · Standard · conteo · escaladas · derivados · perfil"
 evaluar(NOMBRE_BASE, "lineal", logistica(BASE))
 
 experimentos_lineales = {
@@ -458,8 +458,10 @@ experimentos_lineales = {
         "ingreso: A (descartada, edad + hipotecas)": replace(
             BASE, income_strategy="A"
         ),
-        "ingreso: 🔷 B (edad + deuda)": replace(BASE, income_strategy="B"),
-        "ingreso: ⭐ C + 🔷 B (ambas)": replace(BASE, income_strategy="CB"),
+        "ingreso: 🔷 C (edad + líneas + dependientes)": replace(
+            BASE, income_strategy="C"
+        ),
+        "ingreso: ⭐ B + 🔷 C (ambas)": replace(BASE, income_strategy="BC"),
     },
     "escalado": {
         "escalado: RobustScaler": replace(BASE, scaler="robust"),
@@ -496,28 +498,28 @@ for grupo, variantes in experimentos_lineales.items():
 # **Lectura** (las diferencias se comparan pliegue por pliegue; la desviación
 # entre pliegues es ~0.007, así que diferencias < 0.001 solo cuentan si son
 # consistentes en casi todos los pliegues):
-# - **Imputación del ingreso:** las estrategias empatan. Frente a ⭐ C, la
-#   mediana global queda en −0.0001, A y 🔷 B en 0.0000, y usar C + B juntas
+# - **Imputación del ingreso:** las estrategias empatan. Frente a ⭐ B, la
+#   mediana global queda en −0.0001, A y 🔷 C en 0.0000, y usar B + C juntas
 #   en +0.0002 (gana 3/5). El ingreso es una variable débil (IV 0.08), así que
-#   imputarlo mejor casi no cambia el AUC. **Se confirma ⭐ C como principal**
-#   por robustez y facilidad de explicación (EDA, sección 10.3 d), y 🔷 B
-#   queda en el dataset como segunda variable.
-# - **Escalado:** `StandardScaler` y `RobustScaler` empatan (+0.0002);
-#   `QuantileTransformer` es peor (−0.0012, pierde en los 5 pliegues).
-# - **Atrasos binarizados:** empate (−0.0001). Se conserva el conteo.
-# - **WoE** (+0.0001, gana 3/5) y ***splines*** (0.0000): sin mejora
+#   imputarlo mejor casi no cambia el AUC. **Se usa ⭐ B porque es la que
+#   imputa con menor error** (16.1 % mejor que la mediana global; EDA,
+#   sección 10.3 d), y 🔷 C queda en el dataset como segunda variable.
+# - **Escalado:** `StandardScaler` y `RobustScaler` empatan (+0.0001);
+#   `QuantileTransformer` es peor (−0.0008, pierde en 4 de 5 pliegues).
+# - **Atrasos binarizados:** empate (−0.0002). Se conserva el conteo.
+# - **WoE** (+0.0003, gana 3/5) y ***splines*** (0.0000): sin mejora
 #   significativa. Con la limpieza y `log1p`, la regresión logística ya capta
 #   casi toda la señal. WoE sigue siendo útil si se quiere una tarjeta de
 #   puntaje (*scorecard*) interpretable.
 # - **Variables nuevas:**
 #   - Quitar el **ingreso disponible** cuesta −0.0003 (la base gana 5/5).
 #     Poco, pero consistente: se conserva.
-#   - Quitar los **indicadores de perfil** cuesta −0.0003 (la base gana 3/5).
-#   - El **ingreso por dependiente no ayuda a la regresión logística**: al
-#     quitarlo el AUC sube +0.0002 (4/5). En el EDA tenía mejor IV que el
+#   - Quitar los **indicadores de perfil** cuesta −0.0003 (la base gana 4/5).
+#   - El **ingreso por dependiente no mueve la regresión logística**: al
+#     quitarlo el AUC queda igual (0.0000). En el EDA tenía mejor IV que el
 #     ingreso solo (0.125 contra 0.088), pero con las demás variables en el
-#     modelo esa información ya está cubierta. Se deja en el dataset porque a
-#     los árboles sí les sirve un poco (sección 5).
+#     modelo esa información ya está cubierta. Se deja en el dataset para
+#     pruebas posteriores.
 #   - Quitar las tres juntas cuesta −0.0005 (la base gana 4/5).
 
 # %% [markdown]
@@ -525,7 +527,7 @@ for grupo, variantes in experimentos_lineales.items():
 
 # %%
 BASE_ARBOLES = FeatureConfig(for_trees=True)
-NOMBRE_BASE_ARBOLES = "árboles base: ⭐ C imputado · derivados · perfil"
+NOMBRE_BASE_ARBOLES = "árboles base: ⭐ B imputado · derivados · perfil"
 evaluar(
     "árboles: variables crudas",
     "árboles",
@@ -536,8 +538,8 @@ evaluar(NOMBRE_BASE_ARBOLES, "árboles", arboles(BASE_ARBOLES))
 
 experimentos_arboles = {
     "árboles: sin imputar (NaN nativo)": replace(BASE_ARBOLES, impute_for_trees=False),
-    "árboles: ingreso 🔷 B": replace(BASE_ARBOLES, income_strategy="B"),
-    "árboles: ingreso ⭐ C + 🔷 B": replace(BASE_ARBOLES, income_strategy="CB"),
+    "árboles: ingreso 🔷 C": replace(BASE_ARBOLES, income_strategy="C"),
+    "árboles: ingreso ⭐ B + 🔷 C": replace(BASE_ARBOLES, income_strategy="BC"),
     "árboles: sin ingreso disponible": replace(BASE_ARBOLES, disposable_income=False),
     "árboles: sin ingreso por dependiente": replace(
         BASE_ARBOLES, income_per_dependent=False
@@ -552,15 +554,16 @@ comparar(NOMBRE_BASE_ARBOLES, ["árboles: variables crudas", *experimentos_arbol
 # **Lectura:**
 # - Los árboles con variables **crudas** ya logran **0.8622**: son robustos a
 #   atípicos y a los códigos 96/98. La ingeniería de variables solo suma
-#   +0.0008 (0.8631), aunque gana en los 5 pliegues.
-# - Imputar o dejar `NaN`, usar ⭐ C, 🔷 B o ambas, e incluir o no el ingreso
-#   disponible: todas las diferencias están dentro de ±0.0004, sin un patrón
-#   consistente entre pliegues.
-# - Quitar el ingreso por dependiente cuesta −0.0003 (la base gana 3/5) y
-#   quitar los indicadores de perfil −0.0002 (la base gana 5/5): aportes muy
-#   pequeños.
+#   +0.0004 (0.8626) y no gana en todos los pliegues (3 de 5).
+# - **Ninguna variante se separa de la base:** imputar o dejar `NaN`, usar
+#   ⭐ B, 🔷 C o ambas, e incluir o no el ingreso disponible, el ingreso por
+#   dependiente o los indicadores de perfil. Todas las diferencias están
+#   dentro de ±0.0004, sin un patrón consistente entre pliegues.
+# - Con 🔷 C los árboles quedan +0.0004 arriba de ⭐ B (0.8631 contra 0.8626,
+#   gana 3/5). Es una diferencia dentro del ruido, pero conviene tenerla
+#   presente al ajustar hiperparámetros: el dataset guarda las dos variables.
 # - Los árboles superan a la mejor regresión logística por ~0.006 (0.8631
-#   contra 0.8570). Para los árboles, las mejoras vendrán de los
+#   contra 0.8571). Para los árboles, las mejoras vendrán de los
 #   hiperparámetros y de combinar modelos, no de más variables.
 
 # %% [markdown]
@@ -647,7 +650,7 @@ plt.show()
 #   variables* (coincide con el WoE del EDA: utilización 0 es menos segura que
 #   0–0.1). Los coeficientes son condicionales y las variables están
 #   correlacionadas, así que se interpretan con cuidado.
-# - **Árboles:** la utilización domina (permutarla baja el AUC 0.066), seguida
+# - **Árboles:** la utilización domina (permutarla baja el AUC 0.065), seguida
 #   de `late_severity`, `total_late`, la edad y las líneas abiertas. Las
 #   variables de ingreso aportan poco y los indicadores casi nada (los árboles
 #   los deducen de las variables originales).
@@ -661,13 +664,13 @@ plt.show()
 #
 # | | Modelos lineales | Modelos de árboles |
 # | --- | --- | --- |
-# | Ingreso | ⭐ C: edad + líneas de crédito + dependientes | ⭐ C (imputado) |
+# | Ingreso | ⭐ B: edad + decil del monto de deuda | ⭐ B (imputado) |
 # | Escalado | `log1p` + `StandardScaler` | Ninguno |
 # | Atrasos | Conteo recortado + `log1p` | Conteo recortado |
 # | Variables nuevas | Ingreso disponible + ingreso por dependiente + `util_zero` + `thin_file` | Igual |
 #
 # **Qué se guarda:** un solo dataset **sin escalar** con todas las variables
-# construidas, incluidas las dos versiones del ingreso (⭐ C y 🔷 B) y sus
+# construidas, incluidas las dos versiones del ingreso (⭐ B y 🔷 C) y sus
 # derivadas, para que cada integrante pueda probar las suyas. Las imputaciones
 # se ajustan con **todo `train`** y se aplican a `test` (así se usa en el
 # entrenamiento final). Para validación cruzada rigurosa, usar
@@ -677,7 +680,7 @@ plt.show()
 # recomendadas para cada tipo de modelo.
 
 # %%
-config_dataset = FeatureConfig(for_trees=True, income_strategy="CB")
+config_dataset = FeatureConfig(for_trees=True, income_strategy="BC")
 preprocesador_dataset = build_preprocessor(config_dataset).fit(X, y)
 dataset_train = preprocesador_dataset.transform(X)
 dataset_test = preprocesador_dataset.transform(X_test)
@@ -738,8 +741,10 @@ especificacion = {
     },
     "arboles": {
         "config": asdict(BASE_ARBOLES),
-        # La base de árboles usa solo ⭐ C: se excluyen las variables de 🔷 B
-        "columnas": [c for c in columnas_modelo if "income_imp_age_debt" not in c],
+        # La base de árboles usa solo ⭐ B: se excluyen las variables de 🔷 C
+        "columnas": [
+            c for c in columnas_modelo if "income_imp_age_lines_dep" not in c
+        ],
     },
     "auc_cv_5_pliegues": {
         "lineal_base": round(float(puntajes[NOMBRE_BASE].mean()), 4),
@@ -785,13 +790,13 @@ print(
 # | # | Hallazgo | Evidencia |
 # | --- | --- | --- |
 # | 1 | **La limpieza pesa más que las variables nuevas** en modelos lineales | Códigos 96/98: +0.114; recortes: +0.037; todo lo demás: +0.006 |
-# | 2 | **Los árboles casi no necesitan ingeniería de variables** | 0.8622 crudas contra 0.8631 con la propuesta |
-# | 3 | Los árboles superan a la regresión logística | 0.8631 contra 0.8570 (mejor variante lineal) |
-# | 4 | La estrategia de imputación del ingreso no cambia el AUC | Global, A, 🔷 B, ⭐ C y C + B: diferencias ≤ 0.0002 |
+# | 2 | **Los árboles casi no necesitan ingeniería de variables** | 0.8622 crudas contra 0.8626 con la propuesta |
+# | 3 | Los árboles superan a la regresión logística | 0.8631 (mejor variante de árboles) contra 0.8571 (mejor variante lineal) |
+# | 4 | La estrategia de imputación del ingreso no cambia el AUC | Lineal: global, A, ⭐ B, 🔷 C y B + C con diferencias ≤ 0.0002; árboles: ≤ 0.0004 |
 # | 5 | Ingreso disponible e indicadores de perfil ayudan poco (lineal) | −0.0003 al quitar cada uno; el ingreso disponible gana 5 de 5 |
-# | 6 | El ingreso por dependiente no ayuda a la regresión logística | +0.0002 al quitarlo (4 de 5); en árboles aporta +0.0003 |
-# | 7 | `StandardScaler` = `RobustScaler`; `QuantileTransformer` empeora | −0.0012, pierde en 5 de 5 |
-# | 8 | WoE y *splines* no superan a limpieza + `log1p` | +0.0001 y 0.0000 |
+# | 6 | El ingreso por dependiente no aporta | 0.0000 al quitarlo en la regresión logística; sin efecto consistente en árboles |
+# | 7 | `StandardScaler` = `RobustScaler`; `QuantileTransformer` empeora | −0.0008, pierde en 4 de 5 |
+# | 8 | WoE y *splines* no superan a limpieza + `log1p` | +0.0003 y 0.0000 |
 # | 9 | Las variables clave son utilización, atrasos y edad | Coeficientes, importancia por permutación y PCA del EDA |
 # | 10 | El ingreso = 1 se comporta como el ingreso 0 | 423 clientes en train y 182 en test; coeficientes del mismo signo |
 #
@@ -802,7 +807,7 @@ print(
 #   inválida de train.
 # - `features_jae.json`: columnas recomendadas y tratamiento para modelos
 #   lineales y de árboles, con el AUC de referencia.
-# - AUC de referencia (5 pliegues): **lineal 0.8568 · árboles 0.8631**.
+# - AUC de referencia (5 pliegues): **lineal 0.8568 · árboles 0.8626**.
 #
 # **Siguientes pasos:**
 # 1. Ajustar hiperparámetros: `C` y tipo de regularización (L1/L2) en la

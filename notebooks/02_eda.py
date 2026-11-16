@@ -864,10 +864,10 @@ estrategias = {
     "edad + utilización de la línea de crédito (quintil)": "edad_utilizacion",
     "edad + dependientes (0, 1, 2+)": "edad_dependientes",
     "edad + n.º de líneas de crédito abiertas (quintil)": "edad_lineas",
-    "⭐ C: edad + líneas de crédito + dependientes": NIVELES_C,
+    "🔷 C (alternativa): edad + líneas de crédito + dependientes": NIVELES_C,
     "A (descartada): edad + n.º de créditos hipotecarios": "edad_hipotecas",
     "mediana por decil del monto de deuda": "decil_deuda",
-    "🔷 B (alternativa): edad + decil del monto de deuda": "edad_deuda",
+    "⭐ B (recomendada): edad + decil del monto de deuda": "edad_deuda",
 }
 comparacion = pd.DataFrame(
     {
@@ -935,10 +935,12 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 # - **Edad + número de líneas de crédito abiertas** es la mejor pareja
 #   (8.6 %). Es la variable más relacionada con el ingreso después de las
 #   hipotecas y la deuda (Spearman 0.31), y **siempre está informada**.
-# - **⭐ C: edad + líneas de crédito + dependientes** junta las dos señales y
+# - **🔷 C: edad + líneas de crédito + dependientes** junta las dos señales y
 #   llega a 9.7 %, casi lo mismo que A (10.6 %).
-# - B es la más precisa (16.1 %), pero es la única que depende del
-#   monto de deuda.
+# - **⭐ B: edad + decil del monto de deuda es la más precisa (16.1 %)**, con
+#   un error de 0.484 contra 0.577 de la mediana global. Ninguna combinación
+#   sin el monto de deuda se le acerca: es la variable más relacionada con el
+#   ingreso (Spearman 0.50).
 #
 # **Lectura de las gráficas:** dentro de cada grupo de edad las curvas quedan
 # ordenadas y casi no se cruzan.
@@ -949,48 +951,58 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 #   dependientes) a 8,000 (2 o más). La diferencia crece con la edad.
 
 # %% [markdown]
-# > ### Propuesta: ⭐ C como principal y 🔷 B como alternativa → dos variables de ingreso
+# > ### Propuesta: ⭐ B como estrategia recomendada y 🔷 C como alternativa
 # >
-# > | | ⭐ C (principal) | 🔷 B (alternativa) | A (descartada) |
+# > | | ⭐ B (recomendada) | 🔷 C (alternativa) | A (descartada) |
 # > | --- | --- | --- | --- |
-# > | **Grupos** | Edad × quintil de líneas de crédito abiertas × dependientes (0, 1, 2+) | Edad × decil del monto mensual de deuda | Edad × n.º de créditos hipotecarios |
-# > | **N.º de grupos** | 162 | 109 | 33 |
-# > | **Mejora vs mediana global** | 9.7 % | **16.1 %** | 10.6 % |
-# > | **Variable nueva** | `income_imp_age_lines_dep` | `income_imp_age_debt` | — (no se construye) |
-# > | **Ventaja** | No usa hipotecas ni deuda; las líneas siempre están informadas; cada grupo se explica solo | La más precisa: el monto de deuda es el mejor predictor del ingreso (Spearman 0.50) | Fácil de explicar |
-# > | **Riesgo** | Algo menos precisa que A y claramente menos que B | Depende de la hipótesis de que, sin ingreso, `DebtRatio` es el monto de deuda; repite información que ya entra al modelo con `debt_amount` | Depende de una sola variable con pocos valores (0, 1, 2+) |
+# > | **Grupos** | Edad × decil del monto mensual de deuda | Edad × quintil de líneas de crédito abiertas × dependientes (0, 1, 2+) | Edad × n.º de créditos hipotecarios |
+# > | **N.º de grupos** | 109 | 162 | 33 |
+# > | **Error (MAE en log)** | **0.484** | 0.521 | 0.515 |
+# > | **Mejora vs mediana global** | **16.1 %** | 9.7 % | 10.6 % |
+# > | **Variable nueva** | `income_imp_age_debt` | `income_imp_age_lines_dep` | — (no se construye) |
+# > | **Ventaja** | La más precisa: el monto de deuda es el mejor predictor del ingreso (Spearman 0.50) | No usa hipotecas ni deuda; las líneas siempre están informadas | Fácil de explicar |
+# > | **Riesgo** | Depende de la hipótesis de que, sin ingreso, `DebtRatio` es el monto de deuda | Menos precisa que A y que B | Depende de una sola variable con pocos valores (0, 1, 2+) |
 # >
-# > **Cómo funciona C (imputación con respaldo):**
-# > 1. Mediana del grupo **edad × líneas × dependientes**, si el grupo tiene
-# >    al menos 30 clientes con ingreso.
-# > 2. Si no (o si faltan los dependientes), mediana de **edad × líneas**.
-# > 3. Si tampoco, mediana del **grupo de edad** y, al final, mediana global.
+# > **Cómo funciona B:**
+# > 1. Se calcula el monto mensual de deuda: `DebtRatio × MonthlyIncome` si
+# >    hay ingreso, o `DebtRatio` tal cual si no lo hay (sección 10.3 b).
+# > 2. El monto se corta en deciles, con cortes aprendidos de los clientes con
+# >    ingreso.
+# > 3. Se imputa la mediana del ingreso del grupo **edad × decil de deuda**; si
+# >    el grupo no existe, la mediana global.
 # >
-# > **Por qué C como principal aunque no sea la más precisa:**
-# > - La diferencia con A es de un punto (9.7 % contra 10.6 %), y ninguna
-# >   mediana adivina bien el ingreso de una persona: aun B deja un error
-# >   grande.
-# > - En el notebook 03 las estrategias de imputación **empatan en AUC**
-# >   (global, A, B, C y C + B: diferencias ≤ 0.0002). La precisión de la
-# >   imputación no decide el modelo, así que conviene elegir por robustez y
-# >   facilidad de explicación.
-# > - C no depende de la hipótesis sobre `DebtRatio` ni del monto de deuda, que
+# > **Por qué B como estrategia recomendada:**
+# > - Es la que mejor imputa: reduce el error 16.1 % frente a la mediana
+# >   global, contra 10.6 % de A y 9.7 % de C.
+# > - La hipótesis en la que se apoya está bien respaldada (sección 10.3 b):
+# >   sin ingreso, el 100 % de los `DebtRatio` son enteros y su distribución
+# >   coincide con la del monto de deuda de los clientes con ingreso.
+# > - El monto de deuda siempre está informado, así que B se puede aplicar a
+# >   todos los clientes sin ingreso.
+# >
+# > **Por qué conservar C como alternativa:**
+# > - No depende de la hipótesis sobre `DebtRatio` ni del monto de deuda, que
 # >   ya entra al modelo por su cuenta (`debt_amount` e ingreso disponible).
-# >
-# > **Por qué conservar B como alternativa:**
-# > - Es la que mejor imputa (16.1 %) y la hipótesis en la que se apoya está
-# >   bien respaldada (sección 10.3 b).
-# > - C y B se parecen poco entre sí (Spearman 0.65): pueden aportar
+# > - B y C se parecen poco entre sí (Spearman 0.65): pueden aportar
 # >   información distinta.
+# > - Imputa con respaldo: mediana de edad × líneas × dependientes si el grupo
+# >   tiene al menos 30 clientes con ingreso; si no (o si faltan los
+# >   dependientes), edad × líneas; después, edad y mediana global.
 # >
-# > **Propuesta:** construir **las dos variables de ingreso** y comparar por
-# > AUC en validación cruzada usar solo C, solo B o ambas. A se descarta: usa
-# > una sola variable con tres valores y queda entre las otras dos.
+# > **Propuesta:** imputar el ingreso con **B** y construir también la
+# > variable de C, para comparar por AUC en validación cruzada usar solo B,
+# > solo C o ambas. A se descarta: usa una sola variable con tres valores y
+# > queda entre las otras dos.
+# >
+# > **Límite de cualquier imputación:** en el notebook 03 las estrategias
+# > empatan en AUC, porque el ingreso es una variable débil (IV 0.088). Una
+# > mejor imputación da una variable de ingreso más fiel, pero por sí sola no
+# > mejora el modelo.
 #
 # En todos los casos se agrega el indicador `income_missing`.
 #
-# **¿Qué ingreso asignan C y B a los clientes sin ingreso?** Se aplican C y
-# B (y, como referencia, A) a los 20,828 clientes sin ingreso. Aquí las
+# **¿Qué ingreso asignan B y C a los clientes sin ingreso?** Se aplican B y
+# C (y, como referencia, A) a los 20,828 clientes sin ingreso. Aquí las
 # medianas se calculan con todos los clientes con ingreso, solo para explorar;
 # en el notebook 03 se calculan dentro de cada pliegue.
 
@@ -1073,43 +1085,42 @@ fig, ax = plt.subplots(figsize=(11, 4.5))
 bins = np.linspace(0, 15_000, 61)
 ax.hist(conocidos["MonthlyIncome"].clip(upper=15_000), bins=bins, density=True,
         alpha=0.35, color="gray", label="ingreso real (clientes con ingreso)")
-ax.hist(imputados["income_imp_age_lines_dep"], bins=bins, density=True, alpha=0.6,
-        label="C (propuesta): edad + líneas + dependientes")
-ax.hist(imputados["income_imp_age_debt"], bins=bins, density=True,
-        histtype="step", lw=1.5, label="B (alternativa): edad + decil de deuda")
+ax.hist(imputados["income_imp_age_debt"], bins=bins, density=True, alpha=0.6,
+        label="B (recomendada): edad + decil de deuda")
+ax.hist(imputados["income_imp_age_lines_dep"], bins=bins, density=True,
+        histtype="step", lw=1.5, label="C (alternativa): edad + líneas + dependientes")
 ax.hist(imputados["income_imp_age_mortgage"], bins=bins, density=True,
         histtype="step", lw=1.5, label="A (descartada): edad + hipotecas")
-ax.set_title("Ingreso imputado a los clientes sin ingreso: C y B (A como referencia)")
+ax.set_title("Ingreso imputado a los clientes sin ingreso: B y C (A como referencia)")
 ax.set_xlabel("ingreso mensual (recortado a 15,000)")
 ax.legend()
 plt.show()
 
 # %% [markdown]
 # **Lectura:**
-# - **El respaldo casi no se usa:** el 86.6 % de los clientes sin ingreso se
-#   imputa con el grupo completo (edad × líneas × dependientes) y el 13.4 %
-#   restante con edad × líneas. Son justo los clientes sin dependientes
-#   informados. Nadie cae hasta la mediana de la edad sola.
-# - **C asigna ingresos más bajos:** su mediana es 5,000, contra 5,416 de A.
-#   Tiene sentido: los clientes sin ingreso tienen menos líneas de crédito
-#   abiertas (mediana 6 contra 8) y C lo toma en cuenta.
-# - **C es una variable distinta de A y B:** su correlación de Spearman con
-#   ellas es 0.65, mientras que A y B se parecen más entre sí (0.84). C difiere
-#   más de 30 % de A en el 12.6 % de los clientes, y de B en el 22.4 %.
-# - **C reparte mejor los valores que A:** A se amontona en pocos picos (por
-#   ejemplo, 6,000) porque solo tiene 33 grupos; C llena el rango de 3,750 a
-#   6,666 sin picos tan marcados.
-# - **B es la más repartida** (de 1,200 a 11,359, desviación 1,991 contra
-#   1,297 de C) y la que más se parece a la forma del ingreso real. Es otra
-#   razón para conservarla como segunda variable.
-# - Las tres son más angostas que el ingreso real:
-#   imputar con medianas siempre reduce la dispersión. Por eso se acompañan
-#   del indicador `income_missing`.
+# - **B es la más repartida:** asigna ingresos de 1,200 a 11,359, con
+#   desviación de 1,991 (contra 1,297 de C y 1,481 de A), y es la que más se
+#   parece a la forma del ingreso real.
+# - **B asigna ingresos más bajos que A:** su mediana es 4,502, contra 5,416
+#   de A y 5,000 de C. Es coherente: los clientes sin ingreso tienen montos
+#   de deuda más bajos (sección 10.3 b) y B lo toma en cuenta.
+# - **A se amontona en pocos picos** (por ejemplo, 6,000) porque solo tiene
+#   33 grupos. B y C no tienen picos tan marcados.
+# - **C es una variable distinta de B:** su correlación de Spearman con B es
+#   0.65, mientras que A y B se parecen más entre sí (0.84). C difiere más de
+#   30 % de B en el 22.4 % de los clientes. Por eso vale la pena conservarla
+#   como segunda variable.
+# - **El respaldo de C casi no se usa:** el 86.6 % de los clientes sin ingreso
+#   se imputa con el grupo completo (edad × líneas × dependientes) y el 13.4 %
+#   restante, que no tiene dependientes informados, con edad × líneas.
+# - Las tres son más angostas que el ingreso real: imputar con medianas
+#   siempre reduce la dispersión. Por eso se acompañan del indicador
+#   `income_missing`.
 
 # %% [markdown]
 # **e) Detalle del monto mensual de deuda**
 #
-# El monto mensual de deuda es la base de la estrategia B y del ingreso
+# El monto mensual de deuda es la base de la estrategia ⭐ B y del ingreso
 # disponible, así que conviene conocerlo a fondo. Se construye con la regla de
 # la sección 10.3 b:
 # - **Con ingreso > 0:** `DebtRatio × MonthlyIncome`.
@@ -1504,9 +1515,9 @@ plt.show()
 # - **Agregar el ingreso por dependiente** = ingreso imputado /
 #   (1 + dependientes). En el módulo es `per_dependent_<ingreso>`, una columna
 #   por cada variable de ingreso imputado. **Resultado en el notebook 03:** no
-#   mejora la regresión logística (+0.0002 de AUC al quitarla) y aporta muy
-#   poco a los árboles (+0.0003). Su buen IV no se traduce en AUC porque el
-#   modelo ya tiene el ingreso y los dependientes por separado.
+#   mejora la regresión logística (el AUC queda igual al quitarla) ni tiene
+#   efecto consistente en los árboles. Su buen IV no se traduce en AUC porque
+#   el modelo ya tiene el ingreso y los dependientes por separado.
 # - Para modelos lineales, probar la interacción joven × dependientes; los
 #   árboles la encuentran solos.
 
@@ -1566,7 +1577,7 @@ print("Atraso máximo real (sin 96/98):", train.loc[~codigo, LATE].max().to_dict
 # | `NumberOfTime60-89DaysPastDueNotWorse` | 95 % ceros; códigos 96/98 | Igual que arriba | Igual que arriba | Igual que arriba | `StandardScaler` | Igual que arriba |
 # | `NumberOfTimes90DaysLate` | 94 % ceros; códigos 96/98 | Igual que arriba | Igual que arriba | Igual que arriba | `StandardScaler` | Igual que arriba |
 # | `DebtRatio` | Es un **monto** cuando falta el ingreso | — | Separar en `debt_ratio_valid` (≤ 10) y `debt_amount` | `log1p` a ambas | `StandardScaler` | `RobustScaler` |
-# | `MonthlyIncome` | 19.8 % faltante; 1,143 en 0; muy disperso (CV 2.3) | ⭐ `income_imp_age_lines_dep` (estrategia C: edad + líneas de crédito + dependientes, con respaldo) + `income_missing` | Recortar a p99 (25,000) + `income_zero` + `income_placeholder` (ingreso = 1) | `log1p`; derivadas: ingreso disponible e ingreso por dependiente | `StandardScaler` | 🔷 `income_imp_age_debt` (estrategia B: edad + decil de deuda) como segunda variable; usar solo C, solo B o ambas |
+# | `MonthlyIncome` | 19.8 % faltante; 1,143 en 0; muy disperso (CV 2.3) | ⭐ `income_imp_age_debt` (estrategia B: edad + decil del monto de deuda) + `income_missing` | Recortar a p99 (25,000) + `income_zero` + `income_placeholder` (ingreso = 1) | `log1p`; derivadas: ingreso disponible e ingreso por dependiente | `StandardScaler` | 🔷 `income_imp_age_lines_dep` (estrategia C: edad + líneas de crédito + dependientes, con respaldo) como segunda variable; usar solo B, solo C o ambas |
 # | `NumberOfOpenCreditLinesAndLoans` | Asimetría moderada (1.2) | — | Recortar a p99 (24) | — | `StandardScaler` | — |
 # | `NumberRealEstateLoansOrLines` | Máximo 54 contra p99 de 4 | — | Recortar a 5 | — | `StandardScaler` | — |
 # | `NumberOfDependents` | 2.6 % faltante (siempre junto con ingreso) | Mediana por grupo de edad (0 o 1) + `dependents_missing` | Recortar a 5 | — | `StandardScaler` | Imputar 0 (la moda) |
@@ -1826,7 +1837,7 @@ plt.show()
 # señal de este análisis.
 #
 # Para clientes sin ingreso no se puede calcular directamente: se usa el
-# ingreso imputado (⭐ C o 🔷 B) menos el monto de deuda, con el indicador
+# ingreso imputado (⭐ B o 🔷 C) menos el monto de deuda, con el indicador
 # `income_missing`.
 
 # %% [markdown]
@@ -1869,7 +1880,7 @@ comparacion_c.round(3)
 #   relación no existe, y la predicción fallaría justo donde se necesita.
 #
 # La versión correcta usa el monto de deuda, que significa lo mismo en ambos
-# grupos. Logra 17.9 %, apenas mejor que 🔷 B (16.1 %), y es más difícil de
+# grupos. Logra 17.9 %, apenas mejor que ⭐ B (16.1 %), y es más difícil de
 # explicar y de mantener. **No es prioritaria.**
 
 # %% [markdown]
@@ -1912,7 +1923,7 @@ pd.DataFrame(
 # | --- | --- | --- |
 # | **a) WoE / IV** | 4 variables con IV > 0.3; captura la curva de la utilización | ✅ **Prioridad alta:** enfoque paralelo para la regresión logística |
 # | **b) Ingreso disponible** | IV casi el doble que el del ingreso | ✅ **Prioridad alta:** variable nueva |
-# | c) Imputación con modelo | Con monto de deuda apenas mejora a 🔷 B | ❌ No prioritaria |
+# | c) Imputación con modelo | Con monto de deuda apenas mejora a ⭐ B | ❌ No prioritaria |
 # | d) *Splines* | Relaciones no lineales en utilización y edad | Experimento secundario |
 # | e) Indicadores de perfil | Utilización 0 y expediente delgado: menos de la mitad del riesgo | Experimento secundario (muy barato) |
 
@@ -1931,8 +1942,8 @@ pd.DataFrame(
 # | Indicadores de ingreso faltante, 0 y de relleno (= 1) | 10.3 e, 10.4 | `income_missing`, `income_zero`, `income_placeholder` |
 # | Recortes: utilización 2, atrasos 6, ingreso 25,000, líneas 24, hipotecas 5, dependientes 5 | 10.6 | `add_fixed_features` |
 # | `DebtRatio` separado en razón válida y monto de deuda | 10.3 b, e | `debt_ratio_valid`, `debt_amount` |
-# | ⭐ C: ingreso por edad + quintil de líneas + dependientes, con respaldo y mínimo de 30 clientes | 10.3 d | `GroupMedianImputer` → `income_imp_age_lines_dep` |
-# | 🔷 B: ingreso por edad + decil del monto de deuda | 10.3 d | `GroupMedianImputer` → `income_imp_age_debt` |
+# | ⭐ B: ingreso por edad + decil del monto de deuda (estrategia por omisión) | 10.3 d | `GroupMedianImputer` → `income_imp_age_debt` |
+# | 🔷 C: ingreso por edad + quintil de líneas + dependientes, con respaldo y mínimo de 30 clientes | 10.3 d | `GroupMedianImputer` → `income_imp_age_lines_dep` |
 # | A: edad + hipotecas (descartada) | 10.3 d | Solo como experimento de referencia |
 # | Ingreso 0 y de relleno fuera del ajuste de las medianas | 10.3 e | `fit_above` del imputador |
 # | Dependientes: mediana por grupo de edad | 10.6 | `GroupMedianImputer` |
@@ -1945,7 +1956,7 @@ pd.DataFrame(
 # **Experimentos del notebook 03** (validación cruzada estratificada de 5
 # pliegues, semilla 42, AUC-ROC; todo lo aprendido se ajusta dentro del
 # pliegue):
-# - Ingreso: solo ⭐ C, solo 🔷 B o **ambas variables** (con mediana global y
+# - Ingreso: solo ⭐ B, solo 🔷 C o **ambas variables** (con mediana global y
 #   A como referencia).
 # - Escalado: `StandardScaler` contra `RobustScaler` contra
 #   `QuantileTransformer`.
@@ -1970,7 +1981,7 @@ pd.DataFrame(
 # | Sin `Id` repetidos; 339 filas con mismo contenido y distinto `Id` | No se elimina nada; probar su efecto en validación cruzada |
 # | Perfiles idénticos con objetivo distinto | Se conservan; son ruido irreducible |
 # | Clase positiva muy minoritaria | Validación cruzada estratificada, AUC-ROC, `class_weight` |
-# | Faltantes en ingreso y dependientes (siempre juntos) | Ingreso: **dos variables imputadas**, ⭐ C (edad + líneas de crédito abiertas + dependientes) y 🔷 B (edad + decil de deuda); A descartada; dependientes: mediana por edad; todas con indicador (sección 10.3) |
+# | Faltantes en ingreso y dependientes (siempre juntos) | Ingreso: imputar con ⭐ B (edad + decil del monto de deuda); 🔷 C (edad + líneas de crédito abiertas + dependientes) como segunda variable; A descartada; dependientes: mediana por edad; todas con indicador (sección 10.3) |
 # | Ingreso muy disperso (CV 2.3, máximo 120 veces el p99) | Recortar a p99 + `log1p` (sección 10.2) |
 # | `DebtRatio` es un monto cuando falta el ingreso (siempre está informado) | Separar en razón válida y monto de deuda; el monto ayuda a inferir el ingreso |
 # | Monto de deuda: muy disperso (CV 2.1), relación en U con la morosidad | `log1p`; vale más combinado con el ingreso (sección 10.3 e) |
