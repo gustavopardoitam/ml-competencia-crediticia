@@ -25,8 +25,16 @@ crediticia. Métrica: AUC-ROC. Estas reglas son las mismas que se aplican en
   funciones, clases, módulos), claves de JSON/YAML/frontmatter, nombres de
   archivos, comandos, nombres propios y de productos, estándares técnicos y
   literales que un script o herramienta interprete.
-- Si un término técnico no tiene traducción de uso común (por ejemplo,
-  `pipeline`, `commit`, `feature`), se puede conservar tal cual.
+- **Anglicismos:** solo se permiten palabras en inglés que sean parte de la
+  jerga estándar de ciencia de datos y aprendizaje de máquina, y no tengan una
+  traducción de uso común en español. Ejemplos permitidos: `fold`,
+  `data leakage`, `pipeline`, `feature`, `commit`, `overfitting`, `boosting`,
+  `early stopping`, `out-of-fold` (OOF), `scaler`, `encoding`, `baseline`.
+  Se escriben tal cual, sin traducirlas ni adaptarlas.
+- Cualquier otra palabra o frase en inglés debe redactarse en español. Los
+  términos de jerga permitidos se usan siempre en su forma inglesa (por
+  ejemplo, `fold` y no «pliegue»; `data leakage` y no «fuga de datos») para
+  mantener un vocabulario uniforme en todo el repositorio.
 
 ### Reglas Obligatorias
 
@@ -44,7 +52,7 @@ crediticia. Métrica: AUC-ROC. Estas reglas son las mismas que se aplican en
    cifras de control (filas de entrada y salida, nulos, duplicados).
 8. Los experimentos deben ser reproducibles: semillas fijas, dependencias
    bloqueadas en `uv.lock` y configuración externa.
-9. Evitar fuga de datos (*data leakage*): el ajuste de transformaciones se hace
+9. Evitar *data leakage*: el ajuste de transformaciones se hace
    solo con datos de entrenamiento y la validación debe reflejar el uso real.
 10. Las decisiones de arquitectura o de modelado relevantes se documentan
     (ADR en `docs/adr/` cuando exista).

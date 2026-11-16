@@ -49,7 +49,7 @@
 # | Ingreso 0 y 1 | 1,143 en 0 y 423 en 1 (valor de relleno) | Indicadores `income_zero` e `income_placeholder` |
 # | `DebtRatio` | Es un monto cuando falta el ingreso | Separado en `debt_ratio_valid` y `debt_amount` |
 # | Variables nuevas | Ingreso disponible (IV 0.161), ingreso por dependiente, atrasos agregados, perfil | Incluidas |
-# | Fuga de información | Ninguna variable original la tiene; la imputación del ingreso con un modelo que use `DebtRatio` sí (EDA 10.8 c) | Se excluye esa imputación; todo lo aprendido se ajusta dentro de cada pliegue |
+# | Data leakage | Ninguna variable original la tiene; la imputación del ingreso con un modelo que use `DebtRatio` sí (EDA 10.8 c) | Se excluye esa imputación; todo lo aprendido se ajusta dentro de cada fold |
 #
 # **Decisiones que se apartan del planteamiento original (y por qué):**
 # - **Escalado:** `StandardScaler` en lugar de `RobustScaler`. Los atípicos ya
@@ -60,14 +60,14 @@
 #   grupo de edad (EDA, sección 10.3). El resto usa la mediana.
 # - **Semilla:** se usa la partición del equipo (`get_cv()`, semilla 985) en
 #   lugar de 42, para que los resultados sean comparables con la bitácora
-#   compartida pliegue por pliegue.
+#   compartida fold por fold.
 # - ***Early stopping*:** el número de árboles se elige con un 10 % reservado
-#   del pliegue de **entrenamiento**, no con el pliegue de validación. Elegirlo
-#   con el pliegue de validación haría que el AUC reportado saliera
+#   del fold de **entrenamiento**, no con el fold de validación. Elegirlo
+#   con el fold de validación haría que el AUC reportado saliera
 #   ligeramente optimista.
 # - **Búsqueda de hiperparámetros de XGBoost:** búsqueda aleatoria con
 #   `ParameterSampler`, porque `RandomizedSearchCV` no permite *early
-#   stopping* por pliegue. Optuna no está entre las dependencias del proyecto.
+#   stopping* por fold. Optuna no está entre las dependencias del proyecto.
 
 # %% [markdown]
 # ## 0. Preparación del entorno
@@ -101,7 +101,7 @@ from evaluation.oof_jae import (  # noqa: E402
     graficar_roc,
     graficar_roc_oof,
     registrar_en_bitacora,
-    tabla_pliegues,
+    tabla_folds,
 )
 from features.engineering_jae import (  # noqa: E402
     ID,
@@ -165,11 +165,11 @@ proporcion.round(2)
 # códigos 96/98 a `NaN`, edad inválida a `NaN`, indicadores, recortes de
 # atípicos, separación de `DebtRatio` y llaves de grupo para la imputación.
 # Son deterministas (no aprenden nada de los datos), por eso se pueden aplicar
-# antes de la validación cruzada sin fuga de información.
+# antes de la validación cruzada sin data leakage.
 #
 # Lo que sí se aprende de los datos (imputaciones, cortes de deciles,
 # escalado) va dentro del `Pipeline` de cada modelo y se ajusta en cada
-# pliegue.
+# fold.
 
 # %%
 y = train_raw[TARGET]
@@ -236,46 +236,46 @@ pares_altos.round(3)
 
 # %% [markdown]
 # ## 3. Esquema de validación
-# - `StratifiedKFold` de 5 pliegues con la semilla del equipo, **la misma
+# - `StratifiedKFold` de 5 folds con la semilla del equipo, **la misma
 #   partición para todos los experimentos** (y para la bitácora compartida).
 # - La función `evaluar_modelo()` (`src/evaluation/oof_jae.py`, con pruebas en
-#   `tests/test_oof_jae.py`) entrena un clon nuevo del modelo en cada pliegue y
+#   `tests/test_oof_jae.py`) entrena un clon nuevo del modelo en cada fold y
 #   devuelve:
-#   - AUC por pliegue, promedio ± desviación estándar.
+#   - AUC por fold, promedio ± desviación estándar.
 #   - AUC de entrenamiento (para medir la brecha con validación).
-#   - AUC OOF global y las predicciones fuera de pliegue (*out-of-fold*): la
-#     probabilidad de cada cliente cuando estuvo en el pliegue de validación.
+#   - AUC OOF global y las predicciones fuera de fold (*out-of-fold*): la
+#     probabilidad de cada cliente cuando estuvo en el fold de validación.
 #   - Para XGBoost, el número de árboles elegido por *early stopping* en cada
-#     pliegue.
+#     fold.
 
 # %%
 cv = get_cv()
-pliegues = pd.DataFrame(
+folds = pd.DataFrame(
     [
         {
-            "pliegue": i,
+            "fold": i,
             "filas entrenamiento": len(idx_tr),
             "filas validación": len(idx_va),
             "% morosos validación": y.iloc[idx_va].mean() * 100,
         }
         for i, (idx_tr, idx_va) in enumerate(cv.split(X, y), start=1)
     ]
-).set_index("pliegue")
-pliegues.round(3)
+).set_index("fold")
+folds.round(3)
 
 # %% [markdown]
-# **Lectura:** los cinco pliegues tienen 21,000 clientes de validación y la
+# **Lectura:** los cinco folds tienen 21,000 clientes de validación y la
 # misma proporción de morosos (≈ 6.68 %): la estratificación funciona.
 
 
 # %%
 def mostrar_experimento(resultado: ResultadoCV) -> None:
-    """Muestra la tabla de AUC por pliegue y la curva ROC de un experimento.
+    """Muestra la tabla de AUC por fold y la curva ROC de un experimento.
 
     Args:
         resultado: Resultado de ``evaluar_modelo``.
     """
-    display(tabla_pliegues(resultado).round(4))
+    display(tabla_folds(resultado).round(4))
     fig, ax = plt.subplots(figsize=(6.5, 6))
     graficar_roc(resultado, ax=ax)
     plt.show()
@@ -313,10 +313,10 @@ mostrar_experimento(resultados["1a"])
 # **Lectura del experimento 1a:**
 # - **Nivel:** AUC de **0.8568 ± 0.0033**. Con las 10 variables crudas, la
 #   misma logística del equipo (`logreg_raw`) logra 0.699 en estos mismos
-#   pliegues: la limpieza y la ingeniería de variables suman +0.158.
-# - **Estabilidad:** los pliegues van de 0.8527 a 0.8607. Los pliegues 2 y 5
+#   folds: la limpieza y la ingeniería de variables suman +0.158.
+# - **Estabilidad:** los folds van de 0.8527 a 0.8607. Los folds 2 y 5
 #   son los más fáciles para todos los modelos de este notebook, por eso las
-#   comparaciones se hacen pliegue por pliegue.
+#   comparaciones se hacen fold por fold.
 # - **Brecha entrenamiento-validación:** 0.0003. No hay sobreajuste: el
 #   modelo es estable, pero su límite es el **sesgo** (solo capta relaciones
 #   lineales en las variables transformadas).
@@ -358,7 +358,7 @@ for penalizacion, datos in rejilla_1b.groupby("penalización"):
     )
 ax.set_xscale("log")
 ax.set_xlabel("C (escala log; menor = más regularización)")
-ax.set_ylabel("AUC de validación (5 pliegues)")
+ax.set_ylabel("AUC de validación (5 folds)")
 ax.set_title("Regresión logística: AUC según C y penalización")
 ax.legend()
 plt.show()
@@ -383,7 +383,7 @@ mostrar_experimento(resultados["1b"])
 #   0.8568 y 0.8571, con L1 o L2. Solo la regularización fuerte (`C ≤ 0.01`)
 #   empeora el modelo, sobre todo con L1 (0.8493 con `C=0.001`).
 # - **Mejor combinación:** L1 con `C=0.3`, AUC **0.8571 ± 0.0033**: +0.0003
-#   sobre 1a, diez veces menor que la desviación entre pliegues. Es un
+#   sobre 1a, diez veces menor que la desviación entre folds. Es un
 #   empate en la práctica.
 # - **Brecha:** 0.0003, igual que 1a. Con 105,000 clientes y 21 variables,
 #   la logística no tiene capacidad para sobreajustar; por eso regularizar no
@@ -453,8 +453,8 @@ coeficientes.head(12).round(3)
 #
 # ### Experimento 2a: hiperparámetros iniciales
 # `learning_rate=0.05` y `max_depth=4`, con hasta 3,000 árboles y *early
-# stopping* de 100 rondas. En cada pliegue, el número de árboles se elige con
-# un 10 % reservado del pliegue de entrenamiento; el pliegue de validación
+# stopping* de 100 rondas. En cada fold, el número de árboles se elige con
+# un 10 % reservado del fold de entrenamiento; el fold de validación
 # solo se usa para medir. Las variables van sin escalar y con `NaN` nativo.
 
 # %%
@@ -499,8 +499,8 @@ mostrar_experimento(resultados["2a"])
 # **Lectura del experimento 2a:**
 # - **Nivel:** AUC de **0.8649 ± 0.0028**, +0.0081 sobre la mejor logística.
 #   Supera también al LightGBM por omisión del equipo (0.8636 en estos mismos
-#   pliegues).
-# - **Estabilidad:** los pliegues van de 0.8613 a 0.8690, con el mismo patrón
+#   folds).
+# - **Estabilidad:** los folds van de 0.8613 a 0.8690, con el mismo patrón
 #   que la logística (2 y 5 más altos).
 # - **Brecha:** 0.0163 (0.8812 en entrenamiento). Los árboles aprenden
 #   detalles del entrenamiento que no se generalizan por completo, pero aun
@@ -519,9 +519,9 @@ mostrar_experimento(resultados["2a"])
 # forma de los árboles.
 #
 # **Advertencia:** elegir la mejor de 30 combinaciones con los mismos
-# pliegues con los que se reporta el AUC introduce un sesgo optimista
+# folds con los que se reporta el AUC introduce un sesgo optimista
 # pequeño. Por eso, la mejora sobre 2a se compara con la variabilidad entre
-# pliegues (sección 6).
+# folds (sección 6).
 
 # %%
 ESPACIO_XGBOOST = {
@@ -578,9 +578,9 @@ mostrar_experimento(resultados["2b"])
 #   `subsample=0.6`, `colsample_bytree=0.7`, `reg_lambda=10` y `gamma=0.5`.
 #   Árboles más profundos, pero con más regularización y muestreo.
 # - **Nivel:** AUC de **0.8659 ± 0.0032**, +0.0010 sobre 2a, y gana en los 5
-#   pliegues.
+#   folds.
 # - **Cautela:** las 10 mejores combinaciones quedan entre 0.8651 y 0.8659:
-#   la superficie es plana y elegir la mejor de 30 con los mismos pliegues
+#   la superficie es plana y elegir la mejor de 30 con los mismos folds
 #   infla un poco el resultado. La mejora real sobre 2a probablemente es
 #   menor a 0.001.
 # - **Brecha:** 0.0179, un poco mayor que 2a, con menos árboles (158 en
@@ -613,7 +613,7 @@ mostrar_experimento(resultados["2c"])
 #   de 2b (−0.0013).
 # - **Empeora el AUC OOF global** (0.8627 contra 0.8657). Al pesar 14 veces
 #   más a los morosos, las probabilidades se inflan de forma distinta en cada
-#   pliegue; dentro de cada pliegue el orden se conserva, pero al juntarlas
+#   fold; dentro de cada fold el orden se conserva, pero al juntarlas
 #   se mezclan peor.
 # - El *early stopping* se detiene muy pronto (67 árboles en promedio).
 # - El AUC solo mide el **orden** de los clientes, y reponderar las clases no
@@ -623,7 +623,7 @@ mostrar_experimento(resultados["2c"])
 # %% [markdown]
 # ### Importancia de variables y valores SHAP
 # Se reentrena el mejor XGBoost con todo `train`, con el número promedio de
-# árboles elegido por *early stopping* en sus pliegues.
+# árboles elegido por *early stopping* en sus folds.
 # - **Ganancia (*gain*):** cuánto mejora la función de pérdida, en promedio,
 #   cada vez que el modelo usa la variable para dividir.
 # - **SHAP:** contribución de cada variable a la predicción de cada cliente
@@ -749,9 +749,9 @@ plt.show()
 
 # %% [markdown]
 # **¿La mejora de XGBoost es real o es ruido?** Como los dos modelos usan los
-# mismos pliegues, la comparación es pareada: se resta el AUC pliegue por
-# pliegue. Si la diferencia es mayor que su propia variabilidad y gana en los
-# 5 pliegues, no es ruido.
+# mismos folds, la comparación es pareada: se resta el AUC fold por
+# fold. Si la diferencia es mayor que su propia variabilidad y gana en los
+# 5 folds, no es ruido.
 
 # %%
 diferencia = resultados[mejor_xgboost].auc_folds - resultados[mejor_lineal].auc_folds
@@ -761,13 +761,13 @@ pareada = pd.DataFrame(
         f"XGBoost {mejor_xgboost}": resultados[mejor_xgboost].auc_folds,
         "diferencia": diferencia,
     },
-    index=[f"pliegue {i}" for i in range(1, 6)],
+    index=[f"fold {i}" for i in range(1, 6)],
 )
 display(pareada.round(4))
 print(f"Diferencia media: {diferencia.mean():+.4f} · desviación: {diferencia.std():.4f}")
-print(f"Pliegues en que gana XGBoost: {(diferencia > 0).sum()}/5")
+print(f"Folds en que gana XGBoost: {(diferencia > 0).sum()}/5")
 print(
-    "Desviación entre pliegues de cada modelo: "
+    "Desviación entre folds de cada modelo: "
     f"{resultados[mejor_lineal].auc_std:.4f} y {resultados[mejor_xgboost].auc_std:.4f}"
 )
 
@@ -775,26 +775,26 @@ print(
 diferencia_2b = resultados["2b"].auc_folds - resultados["2a"].auc_folds
 print(
     f"\n2b contra 2a: {diferencia_2b.mean():+.4f} "
-    f"(gana en {(diferencia_2b > 0).sum()}/5 pliegues)"
+    f"(gana en {(diferencia_2b > 0).sum()}/5 folds)"
 )
 
 # %% [markdown]
 # **Lectura de la comparación:**
 # - **XGBoost supera a la logística de forma real, no por ruido:** +0.0087
-#   de AUC en promedio, gana en los 5 pliegues y la diferencia apenas varía
-#   entre pliegues (desviación 0.0010). La mejora es casi tres veces la
-#   desviación entre pliegues de cada modelo (≈ 0.0033).
+#   de AUC en promedio, gana en los 5 folds y la diferencia apenas varía
+#   entre folds (desviación 0.0010). La mejora es casi tres veces la
+#   desviación entre folds de cada modelo (≈ 0.0033).
 # - **Entre los XGBoost, las diferencias son pequeñas:** 2b supera a 2a por
-#   +0.0010 en los 5 pliegues, pero con el sesgo de la búsqueda; 2c queda
+#   +0.0010 en los 5 folds, pero con el sesgo de la búsqueda; 2c queda
 #   abajo.
 # - **Frente al equipo:** 2b (0.8659) supera al LightGBM por omisión con
-#   `prepare()` (0.8636) por +0.0023, en los mismos pliegues. Es menor que la
-#   desviación entre pliegues y la bitácora no guarda el AUC por pliegue de
+#   `prepare()` (0.8636) por +0.0023, en los mismos folds. Es menor que la
+#   desviación entre folds y la bitácora no guarda el AUC por fold de
 #   ese modelo, así que no se puede afirmar que sea una mejora real.
 # - **Compromiso sesgo-varianza:** la logística tiene brecha casi nula pero
 #   AUC menor (**sesgo alto**); XGBoost tiene brecha de 0.018 (**más
-#   varianza**) pero valida mejor en todos los pliegues. Su varianza está
-#   controlada: la desviación entre pliegues es igual a la de la logística.
+#   varianza**) pero valida mejor en todos los folds. Su varianza está
+#   controlada: la desviación entre folds es igual a la de la logística.
 # - **Tiempo:** todos los experimentos tardan menos de 5 s por validación
 #   cruzada; el costo está en las búsquedas (38 s para la logística y 124 s
 #   para XGBoost).
@@ -896,8 +896,8 @@ submission.head()
 #
 # 1. **XGBoost 2b es el mejor modelo:** AUC de 0.8659 ± 0.0032 (OOF 0.8657)
 #    en la partición del equipo.
-# 2. **XGBoost supera a la logística por +0.0087 en los 5 pliegues**, casi
-#    tres veces la desviación entre pliegues: la mejora es real.
+# 2. **XGBoost supera a la logística por +0.0087 en los 5 folds**, casi
+#    tres veces la desviación entre folds: la mejora es real.
 # 3. **La logística está limitada por sesgo, no por varianza:** brecha de
 #    0.0003; ajustar `C` y la penalización solo suma +0.0003.
 # 4. **Ajustar XGBoost aporta poco:** +0.0010 sobre los hiperparámetros

@@ -31,6 +31,13 @@ AUC-ROC. Metodología: CRISP-DM.
   `logging`, excepciones, mensajes de commit). Se conservan en su idioma
   original: identificadores de código, claves JSON/YAML, nombres de archivo,
   comandos y nombres propios.
+- **Anglicismos:** solo se permiten palabras en inglés que sean parte de la
+  jerga estándar de ciencia de datos y aprendizaje de máquina y no tengan una
+  traducción de uso común (`fold`, `data leakage`, `pipeline`, `feature`,
+  `commit`, `overfitting`, `boosting`, `early stopping`, `out-of-fold`,
+  `scaler`, `encoding`, `baseline`). Se usan siempre en su forma inglesa
+  (`fold`, no «pliegue»; `data leakage`, no «fuga de datos»). Cualquier otra
+  palabra o frase en inglés se redacta en español.
 - **Evidencia:** todo entregable debe tener evidencia verificable (README, PRs,
   commits, logs o pruebas).
 - **Seguridad:** nunca exponer secretos ni datos sensibles; el token de Kaggle

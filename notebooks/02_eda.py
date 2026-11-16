@@ -438,8 +438,8 @@ plt.show()
 #   validación cruzada. Están en `clean_raw()` y `add_fixed_features()` de
 #   `src/features/engineering_jae.py`.
 # - **Aprendidas:** medianas, medias o desviaciones calculadas con los datos.
-#   Se ajustan **solo con el pliegue de entrenamiento** dentro de un
-#   `Pipeline`, para evitar fuga de datos.
+#   Se ajustan **solo con el fold de entrenamiento** dentro de un
+#   `Pipeline`, para evitar data leakage.
 
 # %% [markdown]
 # ### 10.1 Perfil de cada variable
@@ -1004,7 +1004,7 @@ display(tabla_edad_dep[list(ETIQUETAS_DEP.values())].round(0))
 # **¿Qué ingreso asignan B y C a los clientes sin ingreso?** Se aplican B y
 # C (y, como referencia, A) a los 20,828 clientes sin ingreso. Aquí las
 # medianas se calculan con todos los clientes con ingreso, solo para explorar;
-# en el notebook 03 se calculan dentro de cada pliegue.
+# en el notebook 03 se calculan dentro de cada fold.
 
 # %%
 conocidos = base.copy()
@@ -1567,7 +1567,7 @@ print("Atraso máximo real (sin 96/98):", train.loc[~codigo, LATE].max().to_dict
 # %% [markdown]
 # ### 10.6 Propuesta por variable
 # Orden de aplicación: **1) limpieza fija → 2) imputación → 3) transformación
-# → 4) escalado**. Los pasos 2 y 4 se aprenden en cada pliegue.
+# → 4) escalado**. Los pasos 2 y 4 se aprenden en cada fold.
 #
 # | Variable | Problema detectado | Faltantes | Atípicos (fijo) | Transformación | Escalado | Alternativa a probar |
 # | --- | --- | --- | --- | --- | --- | --- |
@@ -1734,7 +1734,7 @@ pd.concat([varianza["% varianza"], auc_componentes], axis=1).round(3).T
 # | 0.02 – 0.1 | Débil |
 # | 0.1 – 0.3 | Medio |
 # | 0.3 – 0.5 | Fuerte |
-# | > 0.5 | Muy fuerte (revisar que no haya fuga de datos) |
+# | > 0.5 | Muy fuerte (revisar que no haya data leakage) |
 
 # %%
 datos_iv = train[FEATS].copy()
@@ -1778,7 +1778,7 @@ plt.show()
 # - Cuatro variables concentran la señal: **utilización** y los **tres
 #   atrasos** (IV > 0.3). La edad tiene señal media. Ingreso, `DebtRatio`,
 #   líneas, hipotecas y dependientes son débiles por sí solas.
-# - El IV de la utilización (> 1) es muy alto. Aquí no es fuga de datos: el
+# - El IV de la utilización (> 1) es muy alto. Aquí no es data leakage: el
 #   riesgo crece de forma muy marcada con la utilización, como muestra la
 #   sección 10.4.
 # - El WoE muestra la **curva** que una regresión logística con la variable
@@ -1797,7 +1797,7 @@ plt.show()
 # En el notebook 03 se usa un codificador propio (`WoEEncoder`, con cortes
 # por cuantiles) para no agregar dependencias; `optbinning`, que busca cortes
 # óptimos y monótonos, queda como mejora posible. Los cortes y el WoE se
-# aprenden **dentro de cada pliegue**, porque usan la variable objetivo.
+# aprenden **dentro de cada fold**, porque usan la variable objetivo.
 
 # %% [markdown]
 # #### b) Ingreso disponible (capacidad de pago)
@@ -1954,8 +1954,8 @@ pd.DataFrame(
 # | `log1p` + `StandardScaler`; alternativas `RobustScaler` y `QuantileTransformer` | 10.5 | `build_preprocessor` |
 #
 # **Experimentos del notebook 03** (validación cruzada estratificada de 5
-# pliegues, semilla 42, AUC-ROC; todo lo aprendido se ajusta dentro del
-# pliegue):
+# folds, semilla 42, AUC-ROC; todo lo aprendido se ajusta dentro del
+# fold):
 # - Ingreso: solo ⭐ B, solo 🔷 C o **ambas variables** (con mediana global y
 #   A como referencia).
 # - Escalado: `StandardScaler` contra `RobustScaler` contra
@@ -2003,4 +2003,4 @@ pd.DataFrame(
 # 5. Comparar el efecto de cada decisión de limpieza y de variables nuevas.
 #
 # **Importante:** las transformaciones (medianas, escalado) se ajustan solo con
-# los datos de entrenamiento de cada partición, para evitar fuga de datos.
+# los datos de entrenamiento de cada partición, para evitar data leakage.

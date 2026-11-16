@@ -22,7 +22,7 @@ Diferencias contra el plan original:
   fuera del ajuste de las medianas y con `DebtRatio` leído como monto.
 - Se agregó el ingreso por dependiente (`per_dependent_<ingreso>`).
 
-Resultados principales (AUC, validación cruzada de 5 pliegues):
+Resultados principales (AUC, validación cruzada de 5 folds):
 regresión logística 0.700 con variables crudas → **0.8568** con la propuesta;
 árboles 0.8622 → **0.8626**.
 
@@ -46,9 +46,9 @@ El detalle y los hallazgos están en la sección 9 del notebook.
    `src/features/engineering_jae.py`, un módulo independiente del
    `features.py` de la rama `feature/features-separabilidad`.
 3. **Transformaciones aprendidas** (medianas, escaladores, percentiles): se
-   ajustan **solo con el pliegue de entrenamiento** dentro de un `Pipeline`.
+   ajustan **solo con el fold de entrenamiento** dentro de un `Pipeline`.
    Nunca se ajustan sobre `train` completo ni sobre `test`.
-4. Validación cruzada estratificada de 5 pliegues, semilla 42, métrica AUC-ROC.
+4. Validación cruzada estratificada de 5 folds, semilla 42, métrica AUC-ROC.
 5. En `test` no se elimina ninguna fila.
 
 ## Hallazgos que motivan el plan
@@ -91,7 +91,7 @@ módulo usa por omisión:
 1. Se calcula el monto mensual de deuda (`debt_amount`, transformación fija):
    `DebtRatio × MonthlyIncome` si hay ingreso; `DebtRatio` tal cual si falta
    el ingreso, es 0 o es el valor de relleno 1.
-2. El monto se corta en deciles, con cortes aprendidos en el pliegue.
+2. El monto se corta en deciles, con cortes aprendidos en el fold.
 3. Se imputa la mediana del grupo edad × decil de deuda; si el grupo no
    existe, la mediana global.
 
@@ -152,7 +152,7 @@ se escalan.
 
 Grupos de edad: cortes `[0, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 120]`.
 Grupos de la estrategia C: quintiles de líneas abiertas (cortes aprendidos
-en el pliegue) y dependientes en 0, 1 o 2+; mínimo de 30 clientes por grupo.
+en el fold) y dependientes en 0, 1 o 2+; mínimo de 30 clientes por grupo.
 
 **Modelos de árboles:** misma limpieza fija e indicadores, sin escalado.
 Comparar imputación contra dejar `NaN` (XGBoost y
@@ -166,7 +166,7 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
 
 | Alternativa | Evidencia | Recomendación |
 | --- | --- | --- |
-| **WoE / IV** | IV: utilización 1.12, atrasos 30–59 0.64, 90+ 0.59, 60–89 0.38, edad 0.27; el resto < 0.1. Captura la curva de la utilización (sube hasta 1–2, baja después; utilización 0 es menos segura que 0–0.1) | ✅ **Prioridad alta:** enfoque paralelo para la regresión logística, con `optbinning` (cortes y WoE aprendidos en cada pliegue) |
+| **WoE / IV** | IV: utilización 1.12, atrasos 30–59 0.64, 90+ 0.59, 60–89 0.38, edad 0.27; el resto < 0.1. Captura la curva de la utilización (sube hasta 1–2, baja después; utilización 0 es menos segura que 0–0.1) | ✅ **Prioridad alta:** enfoque paralelo para la regresión logística, con `optbinning` (cortes y WoE aprendidos en cada fold) |
 | **Ingreso disponible** (`ingreso − debt_amount`) | IV 0.161 contra 0.088 del ingreso; morosidad monótona de 11.1 % a 3.3 % por decil | ✅ **Prioridad alta:** variable nueva; con ingreso imputado cuando falta |
 | Imputación del ingreso con modelo | Con `DebtRatio` mejora 37.1 %, pero es engañoso (la razón solo existe con ingreso); con monto de deuda, 17.9 % (apenas mejor que B) | ❌ No prioritaria |
 | *Splines* (`SplineTransformer`) | Relaciones no lineales en utilización y edad | Experimento secundario |
@@ -193,7 +193,7 @@ señal, así que esas variables son la prioridad de la ingeniería de variables.
      `thin_file`.
    - Representación WoE con el codificador propio `WoEEncoder`.
 2. `tests/test_engineering_jae.py`: pruebas del imputador (no usa datos del
-   pliegue de validación, no deja `NaN`, respeta el respaldo por niveles y el
+   fold de validación, no deja `NaN`, respeta el respaldo por niveles y el
    global), del ingreso de relleno, de las variables derivadas y de los
    recortes.
 3. Notebook con los experimentos:

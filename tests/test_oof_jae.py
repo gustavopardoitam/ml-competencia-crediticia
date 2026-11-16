@@ -15,7 +15,7 @@ from evaluation.log import read_log
 from evaluation.oof_jae import (
     evaluar_modelo,
     registrar_en_bitacora,
-    tabla_pliegues,
+    tabla_folds,
 )
 
 
@@ -45,17 +45,17 @@ def test_oof_cubre_todas_las_filas(
     assert resultado.auc_train >= resultado.auc_media - 0.05
 
 
-def test_cada_pliegue_usa_un_clon_nuevo(
+def test_cada_fold_usa_un_clon_nuevo(
     datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
 ) -> None:
     X, y = datos
     modelo = make_pipeline(StandardScaler(), LogisticRegression())
     evaluar_modelo(modelo, X, y, "pipeline", cv=cv)
-    # El modelo original no se ajusta: cada pliegue trabaja con un clon
+    # El modelo original no se ajusta: cada fold trabaja con un clon
     assert not hasattr(modelo[-1], "coef_")
 
 
-def test_early_stopping_registra_arboles_por_pliegue(
+def test_early_stopping_registra_arboles_por_fold(
     datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
 ) -> None:
     X, y = datos
@@ -84,11 +84,11 @@ def test_valida_objetivo_binario(datos: tuple[pd.DataFrame, pd.Series]) -> None:
         evaluar_modelo(LogisticRegression(), X, pd.Series([2] * len(X)), "x")
 
 
-def test_tabla_de_pliegues_incluye_promedio_y_desviacion(
+def test_tabla_de_folds_incluye_promedio_y_desviacion(
     datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
 ) -> None:
     X, y = datos
-    tabla = tabla_pliegues(evaluar_modelo(LogisticRegression(), X, y, "lr", cv=cv))
+    tabla = tabla_folds(evaluar_modelo(LogisticRegression(), X, y, "lr", cv=cv))
     assert list(tabla.index[-2:]) == ["promedio", "desv"]
     assert tabla.loc["promedio", "AUC validación"] == pytest.approx(
         tabla.iloc[:3]["AUC validación"].mean()

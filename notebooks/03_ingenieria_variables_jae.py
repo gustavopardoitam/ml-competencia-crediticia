@@ -25,15 +25,15 @@
 # `docs/plan_ingenieria_variables.md`.
 #
 # **Protocolo de evaluación (igual para todos los experimentos):**
-# - Validación cruzada estratificada de 5 pliegues, semilla 42, **mismos
-#   pliegues** para todos: las comparaciones son pareadas.
+# - Validación cruzada estratificada de 5 folds, semilla 42, **mismos
+#   folds** para todos: las comparaciones son pareadas.
 # - Métrica: AUC-ROC.
 # - Modelo lineal: regresión logística (L2, `C=1`). Modelo de árboles:
 #   `HistGradientBoostingClassifier` con parámetros por omisión. Los
 #   hiperparámetros se ajustarán en la siguiente etapa; aquí solo se comparan
 #   variables.
 # - Todo lo que se aprende de los datos (medianas, cortes, WoE, escaladores)
-#   se ajusta **dentro de cada pliegue** con un `Pipeline`.
+#   se ajusta **dentro de cada fold** con un `Pipeline`.
 
 # %% [markdown]
 # ## 0. Preparación
@@ -205,7 +205,7 @@ def evaluar(
         datos: Variables de entrada.
 
     Returns:
-        AUC de cada pliegue.
+        AUC de cada fold.
     """
     auc = cross_val_score(modelo, datos, y, cv=CV, scoring="roc_auc")
     puntajes[nombre] = auc
@@ -254,14 +254,14 @@ def arboles(config: FeatureConfig) -> Pipeline:
 
 
 def comparar(base: str, variantes: list[str]) -> pd.DataFrame:
-    """Compara variantes contra una base, pliegue por pliegue.
+    """Compara variantes contra una base, fold por fold.
 
     Args:
         base: Experimento de referencia.
         variantes: Experimentos a comparar.
 
     Returns:
-        Tabla con AUC, diferencia promedio y pliegues en que gana la variante.
+        Tabla con AUC, diferencia promedio y folds en que gana la variante.
     """
     filas = []
     for nombre in variantes:
@@ -272,7 +272,7 @@ def comparar(base: str, variantes: list[str]) -> pd.DataFrame:
                 "AUC": puntajes[nombre].mean(),
                 "desv": puntajes[nombre].std(),
                 f"diferencia vs {base}": diferencia.mean(),
-                "pliegues en que gana": f"{int((diferencia > 0).sum())}/5",
+                "folds en que gana": f"{int((diferencia > 0).sum())}/5",
             }
         )
     return pd.DataFrame(filas).set_index("experimento").round(4)
@@ -404,7 +404,7 @@ tabla_escalera = pd.DataFrame(
 )
 tabla_escalera["aporte del paso"] = tabla_escalera["AUC"].diff()
 nombres = list(escalera)
-tabla_escalera["pliegues en que mejora"] = ["—"] + [
+tabla_escalera["folds en que mejora"] = ["—"] + [
     f"{int((puntajes[b] > puntajes[a]).sum())}/5" for a, b in zip(nombres, nombres[1:])
 ]
 display(tabla_escalera.round(4))
@@ -423,7 +423,7 @@ for i, (v, d) in enumerate(zip(tabla_escalera["AUC"], tabla_escalera["desv"])):
 ax.set_title(
     "Regresión logística: AUC al agregar cada paso de la ingeniería de variables"
 )
-ax.set_xlabel("AUC-ROC (5 pliegues)")
+ax.set_xlabel("AUC-ROC (5 folds)")
 plt.show()
 
 # %% [markdown]
@@ -437,7 +437,7 @@ plt.show()
 # - Separar `DebtRatio` casi no mueve el AUC de la regresión logística
 #   (+0.0002), pero es necesario para calcular el monto de deuda, la
 #   imputación ⭐ B y el ingreso disponible.
-# - `log1p` aporta +0.005 (en los 5 pliegues) y la propuesta completa +0.0005
+# - `log1p` aporta +0.005 (en los 5 folds) y la propuesta completa +0.0005
 #   más (en 4 de 5).
 # - **Total: +0.157 de AUC; el 96 % viene de los dos primeros pasos de
 #   limpieza.**
@@ -445,7 +445,7 @@ plt.show()
 # %% [markdown]
 # ## 4. Experimentos con regresión logística
 # Base: la propuesta completa (paso 6). Cada experimento cambia **una sola
-# decisión** y se compara pliegue por pliegue contra la base.
+# decisión** y se compara fold por fold contra la base.
 
 # %%
 BASE = FeatureConfig()
@@ -495,9 +495,9 @@ for grupo, variantes in experimentos_lineales.items():
     display(comparar(NOMBRE_BASE, list(variantes)))
 
 # %% [markdown]
-# **Lectura** (las diferencias se comparan pliegue por pliegue; la desviación
-# entre pliegues es ~0.007, así que diferencias < 0.001 solo cuentan si son
-# consistentes en casi todos los pliegues):
+# **Lectura** (las diferencias se comparan fold por fold; la desviación
+# entre folds es ~0.007, así que diferencias < 0.001 solo cuentan si son
+# consistentes en casi todos los folds):
 # - **Imputación del ingreso:** las estrategias empatan. Frente a ⭐ B, la
 #   mediana global queda en −0.0001, A y 🔷 C en 0.0000, y usar B + C juntas
 #   en +0.0002 (gana 3/5). El ingreso es una variable débil (IV 0.08), así que
@@ -505,7 +505,7 @@ for grupo, variantes in experimentos_lineales.items():
 #   imputa con menor error** (16.1 % mejor que la mediana global; EDA,
 #   sección 10.3 d), y 🔷 C queda en el dataset como segunda variable.
 # - **Escalado:** `StandardScaler` y `RobustScaler` empatan (+0.0001);
-#   `QuantileTransformer` es peor (−0.0008, pierde en 4 de 5 pliegues).
+#   `QuantileTransformer` es peor (−0.0008, pierde en 4 de 5 folds).
 # - **Atrasos binarizados:** empate (−0.0002). Se conserva el conteo.
 # - **WoE** (+0.0003, gana 3/5) y ***splines*** (0.0000): sin mejora
 #   significativa. Con la limpieza y `log1p`, la regresión logística ya capta
@@ -554,11 +554,11 @@ comparar(NOMBRE_BASE_ARBOLES, ["árboles: variables crudas", *experimentos_arbol
 # **Lectura:**
 # - Los árboles con variables **crudas** ya logran **0.8622**: son robustos a
 #   atípicos y a los códigos 96/98. La ingeniería de variables solo suma
-#   +0.0004 (0.8626) y no gana en todos los pliegues (3 de 5).
+#   +0.0004 (0.8626) y no gana en todos los folds (3 de 5).
 # - **Ninguna variante se separa de la base:** imputar o dejar `NaN`, usar
 #   ⭐ B, 🔷 C o ambas, e incluir o no el ingreso disponible, el ingreso por
 #   dependiente o los indicadores de perfil. Todas las diferencias están
-#   dentro de ±0.0004, sin un patrón consistente entre pliegues.
+#   dentro de ±0.0004, sin un patrón consistente entre folds.
 # - Con 🔷 C los árboles quedan +0.0004 arriba de ⭐ B (0.8631 contra 0.8626,
 #   gana 3/5). Es una diferencia dentro del ruido, pero conviene tenerla
 #   presente al ajustar hiperparámetros: el dataset guarda las dos variables.
@@ -593,7 +593,7 @@ ax.axvline(
 ax.set_title(
     "AUC-ROC de todos los experimentos (gris: escalera · azul: lineal · verde: árboles)"
 )
-ax.set_xlabel("AUC-ROC (5 pliegues) · eje recortado a 0.84–0.87")
+ax.set_xlabel("AUC-ROC (5 folds) · eje recortado a 0.84–0.87")
 ax.legend(loc="lower right")
 plt.show()
 tabla_resultados.set_index("experimento").round(4)
@@ -746,7 +746,7 @@ especificacion = {
             c for c in columnas_modelo if "income_imp_age_lines_dep" not in c
         ],
     },
-    "auc_cv_5_pliegues": {
+    "auc_cv_5_folds": {
         "lineal_base": round(float(puntajes[NOMBRE_BASE].mean()), 4),
         "arboles_base": round(float(puntajes[NOMBRE_BASE_ARBOLES].mean()), 4),
     },
@@ -765,7 +765,7 @@ for archivo in sorted(SALIDA.iterdir()):
 # ### Verificación: el dataset guardado reproduce el AUC
 # Se vuelve a leer el archivo y se entrena con las columnas recomendadas. Como
 # las imputaciones se ajustaron con todo `train`, el AUC no es idéntico al del
-# pipeline ajustado dentro de cada pliegue, pero debe quedar muy cerca.
+# pipeline ajustado dentro de cada fold, pero debe quedar muy cerca.
 
 # %%
 leido = pd.read_parquet(SALIDA / "train_jae.parquet")
@@ -781,7 +781,7 @@ print(
     f"Árboles sobre el dataset guardado: AUC {auc_leido.mean():.4f} ± {auc_leido.std():.4f}"
 )
 print(
-    f"Árboles con pipeline en cada pliegue: AUC {puntajes[NOMBRE_BASE_ARBOLES].mean():.4f}"
+    f"Árboles con pipeline en cada fold: AUC {puntajes[NOMBRE_BASE_ARBOLES].mean():.4f}"
 )
 
 # %% [markdown]
@@ -807,7 +807,7 @@ print(
 #   inválida de train.
 # - `features_jae.json`: columnas recomendadas y tratamiento para modelos
 #   lineales y de árboles, con el AUC de referencia.
-# - AUC de referencia (5 pliegues): **lineal 0.8568 · árboles 0.8626**.
+# - AUC de referencia (5 folds): **lineal 0.8568 · árboles 0.8626**.
 #
 # **Siguientes pasos:**
 # 1. Ajustar hiperparámetros: `C` y tipo de regularización (L1/L2) en la

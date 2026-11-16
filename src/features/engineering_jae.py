@@ -6,7 +6,7 @@ El módulo separa dos tipos de transformación:
   aprenden nada de los datos, así que se pueden aplicar antes de la validación
   cruzada.
 - **Aprendidas:** :class:`GroupMedianImputer`, :class:`WoEEncoder` y los
-  escaladores. Se ajustan solo con el pliegue de entrenamiento dentro del
+  escaladores. Se ajustan solo con el fold de entrenamiento dentro del
   ``Pipeline`` que construye :func:`build_preprocessor`.
 
 Los umbrales fijos provienen del EDA (``notebooks/02_eda.ipynb``, sección 10).
@@ -328,7 +328,7 @@ class GroupMedianImputer(BaseEstimator, TransformerMixin):
         """Aprende las medianas por grupo.
 
         Args:
-            X: Datos del pliegue de entrenamiento.
+            X: Datos del fold de entrenamiento.
             y: Ignorado; se acepta por compatibilidad con ``Pipeline``.
 
         Returns:
@@ -431,7 +431,7 @@ class WoEEncoder(BaseEstimator, TransformerMixin):
 
     El WoE de un rango es ``ln(% no morosos / % morosos)``: negativo indica más
     riesgo. Los cortes y el WoE se aprenden en ``fit`` con la variable objetivo,
-    por eso deben ajustarse dentro de cada pliegue.
+    por eso deben ajustarse dentro de cada fold.
 
     Args:
         columns: Columnas a codificar.
@@ -454,7 +454,7 @@ class WoEEncoder(BaseEstimator, TransformerMixin):
         """Aprende cortes, WoE e IV de cada variable.
 
         Args:
-            X: Datos del pliegue de entrenamiento.
+            X: Datos del fold de entrenamiento.
             y: Variable objetivo binaria (1 = moroso).
 
         Returns:
@@ -671,7 +671,7 @@ def build_preprocessor(config: FeatureConfig) -> Pipeline:
     """Construye el ``Pipeline`` de transformaciones aprendidas.
 
     Recibe la salida de :func:`prepare_fixed`. Todos los pasos se ajustan solo
-    con los datos que recibe ``fit`` (el pliegue de entrenamiento).
+    con los datos que recibe ``fit`` (el fold de entrenamiento).
 
     Args:
         config: Configuración del experimento.

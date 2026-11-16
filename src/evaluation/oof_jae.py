@@ -1,9 +1,9 @@
-"""Validación cruzada con predicciones fuera de pliegue (OOF) para comparar modelos.
+"""Validación cruzada con predicciones fuera de fold (OOF) para comparar modelos.
 
 Complementa a :func:`evaluation.cv.evaluate`: usa la misma partición del equipo
 (:func:`evaluation.cv.get_cv`), pero además de la media y la desviación del AUC
 devuelve el AUC de entrenamiento, las predicciones OOF y las curvas ROC de cada
-pliegue. Soporta *early stopping* para modelos de *boosting* sin usar el pliegue
+fold. Soporta *early stopping* para modelos de *boosting* sin usar el fold
 de validación para elegir el número de árboles.
 """
 
@@ -34,13 +34,13 @@ class ResultadoCV:
 
     Attributes:
         nombre: Nombre del experimento.
-        auc_folds: AUC de validación de cada pliegue.
-        auc_train_folds: AUC sobre los datos de entrenamiento de cada pliegue.
+        auc_folds: AUC de validación de cada fold.
+        auc_train_folds: AUC sobre los datos de entrenamiento de cada fold.
         oof: Probabilidad predicha para cada fila cuando estuvo en validación.
         auc_oof: AUC global calculado con todas las predicciones OOF.
         tiempo_s: Segundos que tomó la validación cruzada completa.
-        curvas: Pares ``(y_validacion, probabilidad)`` de cada pliegue.
-        n_arboles: Árboles elegidos por *early stopping* en cada pliegue
+        curvas: Pares ``(y_validacion, probabilidad)`` de cada fold.
+        n_arboles: Árboles elegidos por *early stopping* en cada fold
             (vacío si no se usó).
     """
 
@@ -55,17 +55,17 @@ class ResultadoCV:
 
     @property
     def auc_media(self) -> float:
-        """AUC de validación promedio entre pliegues."""
+        """AUC de validación promedio entre folds."""
         return float(self.auc_folds.mean())
 
     @property
     def auc_std(self) -> float:
-        """Desviación estándar del AUC de validación entre pliegues."""
+        """Desviación estándar del AUC de validación entre folds."""
         return float(self.auc_folds.std())
 
     @property
     def auc_train(self) -> float:
-        """AUC de entrenamiento promedio entre pliegues."""
+        """AUC de entrenamiento promedio entre folds."""
         return float(self.auc_train_folds.mean())
 
     @property
@@ -100,17 +100,17 @@ def _ajustar_con_parada(
 ) -> int:
     """Ajusta un modelo de *boosting* con *early stopping* sobre una partición interna.
 
-    El conjunto de parada se separa del pliegue de **entrenamiento**, nunca del de
+    El conjunto de parada se separa del fold de **entrenamiento**, nunca del de
     validación, para que el número de árboles no se elija viendo los datos con
     los que después se mide el AUC.
 
     Args:
         modelo: Estimador o ``Pipeline`` cuyo último paso acepta ``eval_set`` y
             expone ``best_iteration`` (por ejemplo, ``XGBClassifier``).
-        X: Variables del pliegue de entrenamiento.
-        y: Objetivo del pliegue de entrenamiento.
+        X: Variables del fold de entrenamiento.
+        y: Objetivo del fold de entrenamiento.
         rondas: Rondas sin mejora antes de detener el entrenamiento.
-        fraccion_parada: Fracción del pliegue que se reserva para la parada.
+        fraccion_parada: Fracción del fold que se reserva para la parada.
         semilla: Semilla de la partición interna.
 
     Returns:
@@ -150,7 +150,7 @@ def evaluar_modelo(
     """Evalúa un modelo con validación cruzada y guarda las predicciones OOF.
 
     Todo lo que el modelo aprende (imputaciones, escalado, árboles) se ajusta
-    solo con el pliegue de entrenamiento, porque en cada pliegue se usa un clon
+    solo con el fold de entrenamiento, porque en cada fold se usa un clon
     nuevo del modelo.
 
     Args:
@@ -160,14 +160,14 @@ def evaluar_modelo(
         nombre: Nombre del experimento.
         cv: Partición; por omisión, la compartida del equipo (``get_cv()``).
         early_stopping_rounds: Si se indica, el último paso se ajusta con
-            *early stopping* sobre una partición interna del pliegue de
+            *early stopping* sobre una partición interna del fold de
             entrenamiento.
-        fraccion_parada: Fracción del pliegue de entrenamiento reservada para
+        fraccion_parada: Fracción del fold de entrenamiento reservada para
             el *early stopping*.
         semilla: Semilla de la partición interna.
 
     Returns:
-        Resultado con AUC por pliegue, AUC de entrenamiento, AUC OOF global,
+        Resultado con AUC por fold, AUC de entrenamiento, AUC OOF global,
         predicciones OOF y curvas ROC.
 
     Raises:
@@ -185,7 +185,7 @@ def evaluar_modelo(
     curvas: list[tuple[np.ndarray, np.ndarray]] = []
     arboles: list[int] = []
     inicio = time.perf_counter()
-    for pliegue, (idx_tr, idx_va) in enumerate(cv.split(X, y), start=1):
+    for fold, (idx_tr, idx_va) in enumerate(cv.split(X, y), start=1):
         X_tr, X_va = X.iloc[idx_tr], X.iloc[idx_va]
         y_tr, y_va = y.iloc[idx_tr], y.iloc[idx_va]
         estimador = clone(modelo)
@@ -207,9 +207,7 @@ def evaluar_modelo(
         auc_val.append(roc_auc_score(y_va, proba_va))
         auc_train.append(roc_auc_score(y_tr, estimador.predict_proba(X_tr)[:, 1]))
         curvas.append((y_va.to_numpy(), proba_va))
-        logger.info(
-            "%s · pliegue %d: AUC validación %.4f", nombre, pliegue, auc_val[-1]
-        )
+        logger.info("%s · fold %d: AUC validación %.4f", nombre, fold, auc_val[-1])
     resultado = ResultadoCV(
         nombre=nombre,
         auc_folds=np.array(auc_val),
@@ -230,21 +228,21 @@ def evaluar_modelo(
     return resultado
 
 
-def tabla_pliegues(resultado: ResultadoCV) -> pd.DataFrame:
-    """Arma la tabla de AUC por pliegue con su promedio y desviación.
+def tabla_folds(resultado: ResultadoCV) -> pd.DataFrame:
+    """Arma la tabla de AUC por fold con su promedio y desviación.
 
     Args:
         resultado: Resultado de :func:`evaluar_modelo`.
 
     Returns:
-        Tabla con una fila por pliegue más las filas ``promedio`` y ``desv``.
+        Tabla con una fila por fold más las filas ``promedio`` y ``desv``.
     """
     tabla = pd.DataFrame(
         {
             "AUC validación": resultado.auc_folds,
             "AUC entrenamiento": resultado.auc_train_folds,
         },
-        index=[f"pliegue {i}" for i in range(1, len(resultado.auc_folds) + 1)],
+        index=[f"fold {i}" for i in range(1, len(resultado.auc_folds) + 1)],
     )
     if resultado.n_arboles:
         tabla["n.º de árboles"] = resultado.n_arboles
@@ -258,7 +256,7 @@ def tabla_pliegues(resultado: ResultadoCV) -> pd.DataFrame:
 def graficar_roc(
     resultado: ResultadoCV, ax: plt.Axes | None = None, titulo: str | None = None
 ) -> plt.Axes:
-    """Grafica las curvas ROC de cada pliegue y la curva OOF global.
+    """Grafica las curvas ROC de cada fold y la curva OOF global.
 
     Args:
         resultado: Resultado de :func:`evaluar_modelo`.
@@ -272,8 +270,8 @@ def graficar_roc(
         _, ax = plt.subplots(figsize=(6, 6))
     for i, (y_va, proba) in enumerate(resultado.curvas):
         fpr, tpr, _ = roc_curve(y_va, proba)
-        ax.plot(fpr, tpr, color="lightgray", lw=1, label="pliegues" if i == 0 else None)
-    # Las curvas de los pliegues juntas son exactamente las predicciones OOF
+        ax.plot(fpr, tpr, color="lightgray", lw=1, label="folds" if i == 0 else None)
+    # Las curvas de los folds juntas son exactamente las predicciones OOF
     y_total = np.concatenate([c[0] for c in resultado.curvas])
     proba_total = np.concatenate([c[1] for c in resultado.curvas])
     fpr, tpr, _ = roc_curve(y_total, proba_total)
@@ -284,7 +282,7 @@ def graficar_roc(
         lw=2.5,
         label=(
             f"OOF global (AUC {resultado.auc_oof:.4f}; "
-            f"pliegues {resultado.auc_media:.4f} ± {resultado.auc_std:.4f})"
+            f"folds {resultado.auc_media:.4f} ± {resultado.auc_std:.4f})"
         ),
     )
     ax.plot([0, 1], [0, 1], ls="--", color="gray", lw=1, label="azar (AUC 0.5)")
