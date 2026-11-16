@@ -27,6 +27,8 @@
 # | --- | --- |
 # | Calidad de datos (duplicados) | Sección 1 |
 # | Valores faltantes y atípicos | Secciones 5, 7 y 10 |
+# | Monto mensual de deuda (detalle) | Sección 10.3 e |
+# | Influencia de los dependientes | Sección 10.3 f |
 # | Ingeniería y selección de variables | Secciones 8 y 9 |
 # | Escalado y preparación de variables | Sección 10 |
 # | Algoritmos de clasificación | Sección 11 (desbalance) |
@@ -872,6 +874,406 @@ plt.show()
 #   vale la pena conservar ambas.
 
 # %% [markdown]
+# **e) Detalle del monto mensual de deuda**
+#
+# El monto mensual de deuda es la base de la estrategia 🔷 B y del ingreso
+# disponible, así que conviene conocerlo a fondo. Se construye con la regla de
+# la sección 10.3 b:
+# - **Con ingreso > 0:** `DebtRatio × MonthlyIncome`.
+# - **Sin ingreso o con ingreso = 0:** `DebtRatio` tal cual (ya es el monto).
+
+# %%
+sin_ingreso_o_cero = train["MonthlyIncome"].isna() | (train["MonthlyIncome"] <= 0)
+monto_deuda_todos = train["DebtRatio"].where(
+    sin_ingreso_o_cero, train["DebtRatio"] * train["MonthlyIncome"]
+)
+grupo_ingreso = pd.Series(
+    np.select(
+        [train["MonthlyIncome"].isna(), train["MonthlyIncome"] == 0],
+        ["sin ingreso", "ingreso = 0"],
+        default="con ingreso",
+    ),
+    index=train.index,
+)
+ORDEN_GRUPOS_INGRESO = ["con ingreso", "sin ingreso", "ingreso = 0"]
+
+
+def resumen_dispersion(serie: pd.Series) -> pd.Series:
+    """Resume la dispersión de una variable numérica.
+
+    Args:
+        serie: Valores a resumir.
+
+    Returns:
+        Conteo, ceros, tendencia central, dispersión, percentiles y atípicos.
+    """
+    q1, q3 = serie.quantile([0.25, 0.75])
+    limite = q3 + 1.5 * (q3 - q1)
+    return pd.Series(
+        {
+            "registros": len(serie),
+            "% en cero": (serie == 0).mean() * 100,
+            "media": serie.mean(),
+            "mediana": serie.median(),
+            "desviación estándar": serie.std(),
+            "coeficiente de variación": serie.std() / serie.mean(),
+            "p25 (Q1)": q1,
+            "p75 (Q3)": q3,
+            "p95": serie.quantile(0.95),
+            "p99": serie.quantile(0.99),
+            "p99.9": serie.quantile(0.999),
+            "máximo": serie.max(),
+            "límite de atípico (Q3 + 1.5·IQR)": limite,
+            "% arriba del límite": (serie > limite).mean() * 100,
+            "% de morosidad": train.loc[serie.index, TARGET].mean() * 100,
+        }
+    )
+
+
+dispersion_deuda = pd.concat(
+    {g: resumen_dispersion(monto_deuda_todos[grupo_ingreso == g]) for g in ORDEN_GRUPOS_INGRESO}
+    | {"todos": resumen_dispersion(monto_deuda_todos)},
+    axis=1,
+)
+dispersion_deuda.round(2)
+
+# %%
+fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+
+# a) Distribución en escala log por grupo
+ax = axes[0, 0]
+for g in ORDEN_GRUPOS_INGRESO:
+    ax.hist(np.log10(monto_deuda_todos[grupo_ingreso == g] + 1), bins=60, density=True,
+            alpha=0.5, label=g)
+ax.set_title("a) Monto mensual de deuda por grupo (escala log10)")
+ax.set_xlabel("log10(monto + 1): 2 = 100 · 3 = 1,000 · 4 = 10,000")
+ax.legend()
+
+# b) Caja por grupo
+ax = axes[0, 1]
+ax.boxplot(
+    [monto_deuda_todos[grupo_ingreso == g].to_numpy() + 1 for g in ORDEN_GRUPOS_INGRESO],
+    tick_labels=ORDEN_GRUPOS_INGRESO,
+    whis=(5, 95),
+    showfliers=False,
+)
+ax.set_yscale("log")
+ax.set_title("b) Dispersión por grupo (caja: p25–p75 · bigotes: p5–p95)")
+ax.set_ylabel("monto + 1 (eje log)")
+
+# c) Monto mediano por grupo de edad
+ax = axes[1, 0]
+for g in ["con ingreso", "sin ingreso"]:
+    mascara_g = grupo_ingreso == g
+    medianas = monto_deuda_todos[mascara_g].groupby(
+        pd.cut(train.loc[mascara_g, "age"], CORTES_EDAD), observed=True
+    ).median()
+    ax.plot([f"{int(i.left)}–{int(i.right)}" for i in medianas.index], medianas.values,
+            marker="o", label=g)
+ax.set_title("c) Monto mediano de deuda por grupo de edad")
+ax.set_xlabel("grupo de edad")
+ax.set_ylabel("monto mediano")
+ax.tick_params(axis="x", rotation=45)
+ax.legend()
+
+# d) Monto de deuda contra ingreso (clientes con ingreso)
+ax = axes[1, 1]
+con = grupo_ingreso == "con ingreso"
+hb = ax.hexbin(
+    np.log10(train.loc[con, "MonthlyIncome"] + 1),
+    np.log10(monto_deuda_todos[con] + 1),
+    gridsize=50, bins="log", cmap="Blues", mincnt=1,
+)
+ax.set_title("d) Monto de deuda contra ingreso (clientes con ingreso, log10)")
+ax.set_xlabel("log10(ingreso + 1)")
+ax.set_ylabel("log10(monto de deuda + 1)")
+fig.colorbar(hb, ax=ax, label="clientes (escala log)")
+
+plt.tight_layout()
+plt.show()
+
+# %%
+# ¿El monto de deuda separa morosos?
+deciles_monto = pd.qcut(monto_deuda_todos.rank(method="first"), 10, labels=False)
+por_decil = pd.DataFrame(
+    {
+        "monto mínimo": monto_deuda_todos.groupby(deciles_monto).min(),
+        "monto máximo": monto_deuda_todos.groupby(deciles_monto).max(),
+        "tasa de morosidad": train[TARGET].groupby(deciles_monto).mean(),
+    }
+).rename_axis("decil")
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.bar(por_decil.index, por_decil["tasa de morosidad"], color="steelblue")
+ax.axhline(train[TARGET].mean(), color="red", ls="--", label="tasa promedio")
+ax.set_xticks(por_decil.index)
+ax.set_xticklabels(
+    [f"{a:,.0f}–{b:,.0f}" for a, b in zip(por_decil["monto mínimo"], por_decil["monto máximo"])],
+    rotation=45, ha="right",
+)
+ax.set_title("Tasa de morosidad por decil del monto mensual de deuda")
+ax.set_xlabel("rango del monto de deuda")
+ax.set_ylabel("tasa de morosidad")
+ax.legend()
+plt.show()
+
+print(f"Clientes con deuda = 0: {(monto_deuda_todos == 0).sum():,} "
+      f"· tasa de morosidad {train.loc[monto_deuda_todos == 0, TARGET].mean():.3f}")
+print("Spearman monto de deuda vs ingreso (con ingreso):",
+      round(monto_deuda_todos[con].corr(train.loc[con, "MonthlyIncome"], method="spearman"), 3))
+por_decil.round(3)
+
+# %%
+# Valores extremos
+extremos = pd.DataFrame(
+    {
+        "monto_deuda": monto_deuda_todos,
+        "grupo": grupo_ingreso,
+        "MonthlyIncome": train["MonthlyIncome"],
+        "DebtRatio": train["DebtRatio"],
+        TARGET: train[TARGET],
+    }
+)
+print("Monto > 20,000:", (monto_deuda_todos > 20_000).sum(),
+      "· monto > 50,000:", (monto_deuda_todos > 50_000).sum())
+print(f"Asimetría: {monto_deuda_todos.skew():.1f} · con log1p: "
+      f"{np.log1p(monto_deuda_todos).skew():.2f}")
+extremos.nlargest(8, "monto_deuda").round(2)
+
+# %% [markdown]
+# **Lectura:**
+# - **Muy disperso, igual que el ingreso:** mediana de 1,546 al mes, pero
+#   máximo de 478,451 (más de 300 veces la mediana); coeficiente de variación
+#   2.1 y asimetría 56. Con `log1p` la asimetría baja a −1.75, así que el
+#   `log1p` es obligatorio para modelos lineales.
+# - **Clientes sin ingreso deben menos:** mediana de 1,158 contra 1,649 de los
+#   que tienen ingreso, y su distribución tiene más montos bajos (p25 de 120
+#   contra 631). Es coherente con perfiles de menor actividad crediticia.
+# - **La deuda sigue el ciclo de vida:** sube hasta la edad media y baja en los
+#   mayores (gráfica c), en ambos grupos.
+# - **Se relaciona con el ingreso** (Spearman 0.50, gráfica d): quien gana más
+#   tiende a deber más. Por eso sirve para inferir el ingreso (🔷 B).
+# - **Por sí solo separa poco a los morosos:** la relación tiene **forma de
+#   U**. El riesgo sube en montos bajos a medios (46 a 1,129: hasta 8.4 %),
+#   baja en el centro (5.2 % entre 1,986 y 2,493) y vuelve a subir en el decil
+#   más alto (más de 4,277: 8.9 %). Dentro del primer decil hay un contraste:
+#   los 2,925 clientes con deuda exactamente 0 tienen 8.6 % de morosidad,
+#   mientras que el resto de ese decil (1 a 46) es de bajo riesgo. Una
+#   regresión logística no capta una U con la variable cruda; WoE o los
+#   árboles sí.
+# - **Su valor está en combinación con el ingreso:** el ingreso disponible
+#   (ingreso − monto de deuda) tiene casi el doble de IV que el ingreso solo
+#   (sección 10.8 b).
+# - **Extremos:** 162 clientes deben más de 20,000 al mes y 46 más de 50,000;
+#   el p99.9 es ~27,300. Algunos son inverosímiles (deber 478,451 al mes con un
+#   ingreso de 13,500): errores de captura. Con `log1p` no hace falta
+#   recortarlos; una alternativa a probar es recortar en el p99.9.
+# - **Hallazgo nuevo: el ingreso = 1 es un valor de relleno.** La franja
+#   vertical de la gráfica d (log10 ≈ 0.3) son **423 clientes con ingreso
+#   exactamente 1**. Su `DebtRatio` mediano es 625 y el 94 % supera 1: como
+#   con el ingreso faltante, ahí `DebtRatio` es el monto de la deuda. Su monto
+#   queda bien calculado (`DebtRatio × 1`), pero su "ingreso" no es real y
+#   distorsiona el ingreso disponible (1 − deuda). **Propuesta:** tratar el
+#   ingreso = 1 igual que el ingreso = 0 (indicador propio y excluirlo al
+#   aprender las medianas de imputación).
+
+# %% [markdown]
+# **f) Influencia de los dependientes económicos**
+#
+# `NumberOfDependents` es el número de personas que dependen económicamente
+# del cliente (sin contarlo a él). Preguntas:
+# 1. ¿Más dependientes implica más riesgo?
+# 2. ¿El efecto es real o se debe a la edad o al ingreso?
+# 3. ¿Cómo aprovecharlo en la ingeniería de variables?
+#
+# Para medir la señal usamos el **Information Value (IV)**, que se explica a
+# detalle en la sección 10.8 a.
+
+# %%
+def information_value(valores: pd.Series, objetivo: pd.Series, n_rangos: int = 10) -> float:
+    """Calcula el Information Value de una variable cortada en cuantiles.
+
+    Los valores faltantes forman un rango propio. Se suma 0.5 a cada conteo
+    para evitar divisiones entre cero.
+
+    Args:
+        valores: Variable a evaluar.
+        objetivo: Variable objetivo binaria (1 = moroso).
+        n_rangos: Número de rangos por cuantiles.
+
+    Returns:
+        Information Value de la variable.
+    """
+    if valores.nunique() > n_rangos:
+        rangos = pd.qcut(valores.rank(method="first"), n_rangos, labels=False)
+    else:
+        rangos = valores
+    rangos = rangos.astype(float).fillna(-1)
+    conteos = pd.crosstab(rangos, objetivo) + 0.5
+    pct_morosos = conteos[1] / conteos[1].sum()
+    pct_no_morosos = conteos[0] / conteos[0].sum()
+    woe = np.log(pct_no_morosos / pct_morosos)
+    return float(((pct_no_morosos - pct_morosos) * woe).sum())
+
+
+dependientes = train["NumberOfDependents"].clip(upper=5)
+etiqueta_dep = dependientes.map(
+    lambda v: "5+" if v == 5 else f"{v:.0f}", na_action="ignore"
+).fillna("faltante")
+ORDEN_DEP = ["0", "1", "2", "3", "4", "5+", "faltante"]
+
+tabla_dep = (
+    train.groupby(etiqueta_dep)[TARGET]
+    .agg(clientes="count", tasa_morosidad="mean")
+    .reindex(ORDEN_DEP)
+)
+tabla_dep["% de clientes"] = tabla_dep["clientes"] / len(train) * 100
+tabla_dep["IC 95 % (±)"] = 1.96 * np.sqrt(
+    tabla_dep["tasa_morosidad"] * (1 - tabla_dep["tasa_morosidad"]) / tabla_dep["clientes"]
+)
+display(tabla_dep.round(4))
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.bar(tabla_dep.index, tabla_dep["tasa_morosidad"], yerr=tabla_dep["IC 95 % (±)"],
+       color=["steelblue"] * 6 + ["gray"], capsize=4)
+ax.axhline(train[TARGET].mean(), color="red", ls="--", label="tasa promedio")
+for i, n in enumerate(tabla_dep["clientes"]):
+    ax.text(i, 0.003, f"n={n:,}", ha="center", fontsize=8, color="white")
+ax.set_title("Tasa de morosidad por número de dependientes (barras: IC 95 %)")
+ax.set_xlabel("número de dependientes")
+ax.set_ylabel("tasa de morosidad")
+ax.legend()
+plt.show()
+print(f"IV de NumberOfDependents: {information_value(dependientes, train[TARGET]):.3f}")
+
+# %% [markdown]
+# **¿Es efecto de los dependientes o de la edad y el ingreso?** Los
+# dependientes se relacionan con la edad (los adultos de 35 a 50 años tienen
+# más) y con el ingreso. Revisamos la morosidad **dentro** de cada grupo de
+# edad y de cada cuartil de ingreso. Se ocultan las celdas con menos de 100
+# clientes.
+
+# %%
+edad_amplia = pd.cut(train["age"], [0, 30, 40, 50, 60, 70, 120], include_lowest=True)
+edad_amplia = edad_amplia.cat.rename_categories(
+    ["≤ 30", "31–40", "41–50", "51–60", "61–70", "> 70"]
+)
+cuartil_ingreso = pd.qcut(
+    train["MonthlyIncome"].where(train["MonthlyIncome"] > 0), 4,
+    labels=["Q1 (bajo)", "Q2", "Q3", "Q4 (alto)"],
+)
+fig, axes = plt.subplots(1, 2, figsize=(17, 5))
+for ax, filas, titulo in [
+    (axes[0], edad_amplia, "por grupo de edad"),
+    (axes[1], cuartil_ingreso, "por cuartil de ingreso (ingreso > 0)"),
+]:
+    tasas = train.pivot_table(index=filas, columns=dependientes, values=TARGET,
+                              aggfunc="mean", observed=True)
+    conteos = train.pivot_table(index=filas, columns=dependientes, values=TARGET,
+                                aggfunc="count", observed=True)
+    tasas.columns = ["0", "1", "2", "3", "4", "5+"]
+    sns.heatmap(tasas.where(conteos.to_numpy() >= 100), annot=True, fmt=".1%",
+                cmap="Reds", ax=ax, cbar_kws={"label": "tasa de morosidad"})
+    ax.set_title(f"Morosidad por dependientes, {titulo}")
+    ax.set_xlabel("número de dependientes")
+    ax.set_ylabel("")
+plt.tight_layout()
+plt.show()
+
+# %%
+# Efecto "neto" con una regresión logística sencilla (variables estandarizadas)
+from sklearn.linear_model import LogisticRegression
+
+con_datos = dependientes.notna() & (train["MonthlyIncome"] > 0)
+explicativas = pd.DataFrame(
+    {
+        "dependientes": dependientes[con_datos],
+        "edad": train.loc[con_datos, "age"],
+        "log ingreso": np.log1p(train.loc[con_datos, "MonthlyIncome"].clip(upper=25_000)),
+    }
+)
+explicativas = (explicativas - explicativas.mean()) / explicativas.std()
+efecto_neto = {}
+for columnas in [["dependientes"], ["dependientes", "edad"],
+                 ["dependientes", "edad", "log ingreso"]]:
+    modelo = LogisticRegression().fit(explicativas[columnas], train.loc[con_datos, TARGET])
+    efecto_neto[" + ".join(columnas)] = modelo.coef_[0][0]
+pd.Series(efecto_neto, name="coeficiente de dependientes").round(3).to_frame()
+
+# %% [markdown]
+# **Ingreso por dependiente:** si los dependientes pesan más cuando el ingreso
+# es bajo, la variable natural es cuánto ingreso le toca a cada miembro del
+# hogar: `ingreso / (1 + dependientes)`.
+
+# %%
+base_ipd = train[con_datos].copy()
+base_ipd["ingreso_por_dependiente"] = base_ipd["MonthlyIncome"] / (
+    1 + base_ipd["NumberOfDependents"]
+)
+iv_dependientes = pd.Series(
+    {
+        "NumberOfDependents": information_value(
+            base_ipd["NumberOfDependents"].clip(upper=5), base_ipd[TARGET]
+        ),
+        "MonthlyIncome": information_value(base_ipd["MonthlyIncome"], base_ipd[TARGET]),
+        "ingreso por dependiente": information_value(
+            base_ipd["ingreso_por_dependiente"], base_ipd[TARGET]
+        ),
+    },
+    name="IV (clientes con ingreso > 0 y dependientes informados)",
+)
+display(iv_dependientes.round(3).to_frame())
+
+deciles_ipd = pd.qcut(base_ipd["ingreso_por_dependiente"].rank(method="first"), 10,
+                      labels=False)
+deciles_ing = pd.qcut(base_ipd["MonthlyIncome"].rank(method="first"), 10, labels=False)
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.plot(base_ipd.groupby(deciles_ipd)[TARGET].mean(), marker="o",
+        label="ingreso por dependiente")
+ax.plot(base_ipd.groupby(deciles_ing)[TARGET].mean(), marker="s", ls="--",
+        label="ingreso solo")
+ax.set_title("Tasa de morosidad por decil: ingreso por dependiente contra ingreso solo")
+ax.set_xlabel("decil (0 = menor)")
+ax.set_ylabel("tasa de morosidad")
+ax.set_xticks(range(10))
+ax.legend()
+plt.show()
+
+# %% [markdown]
+# **Lectura:**
+# - **Más dependientes, más riesgo, de forma ordenada:** la morosidad sube de
+#   5.9 % sin dependientes a 7.2 % (1), 8.2 % (2), 9.1 % (3), 9.7 % (4) y
+#   10.1 % (5 o más). Los intervalos de confianza de 0, 1, 2 y 3 no se
+#   traslapan, así que la diferencia es real.
+# - **Los clientes sin el dato tienen el menor riesgo (4.8 %)**. Recordemos que
+#   son los mismos que no reportan ingreso (sección 10.3 a): el indicador
+#   `dependents_missing` captura esa diferencia.
+# - **Por sí sola es una variable débil (IV 0.035)** porque el 58 % de los
+#   clientes no tiene dependientes.
+# - **El efecto es real, no solo de la edad o el ingreso:** su coeficiente baja
+#   de 0.17 a 0.11 al controlar por edad, pero se mantiene (0.13) al agregar el
+#   ingreso.
+# - **Pero depende del contexto (interacción):**
+#   - En **jóvenes (≤ 30)** la morosidad se dispara: de 10.6 % sin
+#     dependientes a 20.1 % con 3.
+#   - En el **cuartil de ingreso más bajo** pasa de 7.6 % a 19.2 % con 4.
+#   - En el **cuartil de ingreso más alto** casi no cambia (4.3 % a 5.2 %), y
+#     entre 41 y 60 años tampoco.
+#   - Los dependientes pesan **cuando los recursos son escasos**.
+# - **Por eso el ingreso por dependiente es mejor variable:** IV de **0.125**
+#   contra 0.088 del ingreso solo y 0.035 de los dependientes, con una
+#   relación más limpia (de 12.2 % en el decil más bajo a 4.2 % en el más
+#   alto).
+#
+# **Propuesta para la ingeniería de variables:**
+# - Conservar `dependents` (recortado a 5) y `dependents_missing`.
+# - **Agregar `income_per_dependent`** = ingreso imputado / (1 + dependientes).
+#   El notebook 03 todavía no la incluye; Gustavo sí la tiene en su
+#   `features.py`.
+# - Para modelos lineales, probar la interacción joven × dependientes; los
+#   árboles la encuentran solos.
+
+# %% [markdown]
 # ### 10.4 Atípicos que se corrigen antes de imputar o escalar
 
 # %%
@@ -1087,32 +1489,6 @@ pd.concat([varianza["% varianza"], auc_componentes], axis=1).round(3).T
 # | > 0.5 | Muy fuerte (revisar que no haya fuga de datos) |
 
 # %%
-def information_value(valores: pd.Series, objetivo: pd.Series, n_rangos: int = 10) -> float:
-    """Calcula el Information Value de una variable cortada en cuantiles.
-
-    Los valores faltantes forman un rango propio. Se suma 0.5 a cada conteo
-    para evitar divisiones entre cero.
-
-    Args:
-        valores: Variable a evaluar.
-        objetivo: Variable objetivo binaria (1 = moroso).
-        n_rangos: Número de rangos por cuantiles.
-
-    Returns:
-        Information Value de la variable.
-    """
-    if valores.nunique() > n_rangos:
-        rangos = pd.qcut(valores.rank(method="first"), n_rangos, labels=False)
-    else:
-        rangos = valores
-    rangos = rangos.astype(float).fillna(-1)
-    conteos = pd.crosstab(rangos, objetivo) + 0.5
-    pct_morosos = conteos[1] / conteos[1].sum()
-    pct_no_morosos = conteos[0] / conteos[0].sum()
-    woe = np.log(pct_no_morosos / pct_morosos)
-    return float(((pct_no_morosos - pct_morosos) * woe).sum())
-
-
 datos_iv = train[FEATS].copy()
 datos_iv[LATE] = datos_iv[LATE].where(datos_iv[LATE] < 96)  # 96/98 → rango propio
 iv_variables = pd.Series(
@@ -1358,6 +1734,9 @@ pd.DataFrame(
 # | Faltantes en ingreso y dependientes (siempre juntos) | Ingreso: **dos variables imputadas**, ⭐ edad + hipotecas y 🔷 edad + decil de deuda; dependientes: mediana por edad; todas con indicador (sección 10.3) |
 # | Ingreso muy disperso (CV 2.3, máximo 120 veces el p99) | Recortar a p99 + `log1p` (sección 10.2) |
 # | `DebtRatio` es un monto cuando falta el ingreso (siempre está informado) | Separar en razón válida y monto de deuda; el monto ayuda a inferir el ingreso |
+# | Monto de deuda: muy disperso (CV 2.1), relación en U con la morosidad | `log1p`; vale más combinado con el ingreso (sección 10.3 e) |
+# | Más dependientes, más riesgo (5.9 % → 10.1 %), sobre todo en jóvenes e ingresos bajos | Agregar ingreso por dependiente (IV 0.125) (sección 10.3 f) |
+# | 423 clientes con ingreso = 1 (valor de relleno, no ingreso real) | Tratarlo como ingreso = 0: indicador propio y fuera del ajuste de la imputación |
 # | PCA: el jugo en los datos se reparte en varios componentes | Ver sección 10.7 |
 # | Utilización y atrasos concentran la señal (IV > 0.3) | WoE / IV como enfoque paralelo (sección 10.8) |
 # | Ingreso disponible: IV casi el doble que el ingreso | Variable nueva (sección 10.8) |

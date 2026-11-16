@@ -19,6 +19,12 @@ regresión logística 0.700 con variables crudas → **0.8565** con la propuesta
 árboles 0.8622 → **0.8629**. El detalle y los hallazgos están en la sección 9
 del notebook.
 
+**Pendientes (hallazgos posteriores al notebook 03):**
+
+- Tratar el ingreso = 1 como el ingreso = 0 (indicador propio y fuera del
+  ajuste de las medianas).
+- Agregar `income_per_dependent` = ingreso imputado / (1 + dependientes).
+
 ## Principios
 
 1. **Orden de aplicación:** limpieza fija → imputación → transformación →
@@ -45,6 +51,9 @@ del notebook.
 | Utilización > 10 son errores de captura | Morosidad 40 % en (1, 2] y 6 % en > 10 | 10.4 |
 | Atrasos 96/98 son códigos, no conteos | 197 filas en train y 72 en test; atraso real máximo 15 | 10.4 |
 | Atrasos casi binarios | 84–95 % ceros (IQR = 0, `RobustScaler` no sirve) | 10.1 |
+| Monto de deuda muy disperso y con relación en U con la morosidad | CV 2.1; morosidad 8.4 % (46–1,129), 5.2 % (centro), 8.9 % (> 4,277); deuda 0: 8.6 % | 10.3 e |
+| Más dependientes, más riesgo, sobre todo con pocos recursos | Morosidad 5.9 % (0) → 10.1 % (5+); en el cuartil de ingreso más bajo 7.6 % → 19.2 %; ingreso por dependiente IV 0.125 | 10.3 f |
+| Ingreso = 1 es un valor de relleno | 423 clientes; `DebtRatio` mediano 625, 94 % > 1 | 10.3 e |
 | El jugo en los datos está repartido | 7 de 10 componentes para el 80 %; PC1 (riesgo) explica 19.8 % y logra AUC 0.82 solo | 10.7 |
 
 ## Imputación del ingreso: dos estrategias → dos variables de ingreso
