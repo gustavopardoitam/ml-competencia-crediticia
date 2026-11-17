@@ -13,6 +13,7 @@ from xgboost import XGBClassifier
 
 from evaluation.log import read_log
 from evaluation.oof_jae import (
+    combinar_resultados,
     evaluar_modelo,
     registrar_en_bitacora,
     tabla_folds,
@@ -104,3 +105,26 @@ def test_registrar_reemplaza_el_experimento_repetido(
     registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
     registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
     assert (read_log(bitacora)["nombre"] == "jae_prueba").sum() == 1
+
+
+def test_combinar_promedia_las_probabilidades_oof(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    a = evaluar_modelo(LogisticRegression(C=0.01), X, y, "a", cv=cv)
+    b = evaluar_modelo(LogisticRegression(C=10.0), X, y, "b", cv=cv)
+    mezcla = combinar_resultados([a, b], y, "mezcla", cv=cv)
+    assert np.allclose(mezcla.oof, (a.oof + b.oof) / 2)
+    assert len(mezcla.auc_folds) == 3
+    assert mezcla.tiempo_s == pytest.approx(a.tiempo_s + b.tiempo_s)
+
+
+def test_combinar_valida_los_pesos(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
+) -> None:
+    X, y = datos
+    a = evaluar_modelo(LogisticRegression(), X, y, "a", cv=cv)
+    with pytest.raises(ValueError, match="peso"):
+        combinar_resultados([a], y, "mezcla", cv=cv, pesos=[0.5, 0.5])
+    with pytest.raises(ValueError, match="al menos"):
+        combinar_resultados([], y, "mezcla", cv=cv)

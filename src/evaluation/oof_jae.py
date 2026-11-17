@@ -228,6 +228,58 @@ def evaluar_modelo(
     return resultado
 
 
+def combinar_resultados(
+    resultados: list[ResultadoCV],
+    y: pd.Series,
+    nombre: str,
+    cv: StratifiedKFold | None = None,
+    pesos: list[float] | None = None,
+) -> ResultadoCV:
+    """Combina varios experimentos promediando sus probabilidades OOF.
+
+    Sirve para promediar semillas de un mismo modelo o para mezclar modelos
+    distintos (*ensemble*). Como solo se promedian predicciones OOF ya
+    calculadas, no hay data leakage: ninguna fila se predijo con un modelo que
+    la haya visto.
+
+    Args:
+        resultados: Resultados de :func:`evaluar_modelo`, todos con la misma
+            partición.
+        y: Objetivo completo, en el mismo orden que las predicciones OOF.
+        nombre: Nombre del experimento combinado.
+        cv: Partición usada en los experimentos; por omisión, ``get_cv()``.
+        pesos: Peso de cada experimento; por omisión, todos pesan igual.
+
+    Returns:
+        Resultado combinado. El AUC de entrenamiento es el promedio del de sus
+        miembros y el tiempo es la suma.
+
+    Raises:
+        ValueError: Si no hay resultados o los pesos no coinciden en número.
+    """
+    if not resultados:
+        raise ValueError("Se requiere al menos un resultado para combinar")
+    if pesos is not None and len(pesos) != len(resultados):
+        raise ValueError("Debe haber un peso por cada resultado")
+    cv = cv if cv is not None else get_cv()
+    oof = np.average([r.oof for r in resultados], axis=0, weights=pesos)
+    auc_val: list[float] = []
+    curvas: list[tuple[np.ndarray, np.ndarray]] = []
+    for _, idx_va in cv.split(np.zeros(len(y)), y):
+        y_va = y.iloc[idx_va].to_numpy()
+        auc_val.append(roc_auc_score(y_va, oof[idx_va]))
+        curvas.append((y_va, oof[idx_va]))
+    return ResultadoCV(
+        nombre=nombre,
+        auc_folds=np.array(auc_val),
+        auc_train_folds=np.mean([r.auc_train_folds for r in resultados], axis=0),
+        oof=oof,
+        auc_oof=float(roc_auc_score(y, oof)),
+        tiempo_s=float(sum(r.tiempo_s for r in resultados)),
+        curvas=curvas,
+    )
+
+
 def tabla_folds(resultado: ResultadoCV) -> pd.DataFrame:
     """Arma la tabla de AUC por fold con su promedio y desviación.
 
