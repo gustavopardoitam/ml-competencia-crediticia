@@ -331,3 +331,16 @@ for im in (0, 1):
 #   quitar la utilización derivada no se replicó (efecto de elegir el mejor entre varios).
 # - SET CANDIDATO FINAL: mínimo de 16 columnas (`prepare_min`): originales limpias, 4 banderas,
 #   total_late y any_late.
+
+# %%
+# AUC univariado por grupo: ¿qué variables separan mejor cuando falta el ingreso?
+rows = []
+for im in (0, 1):
+    mk = X_fe["income_missing"] == im
+    for c in ["util_clip", "total_late", "age", "DebtRatio",
+              "NumberOfOpenCreditLinesAndLoans", "NumberRealEstateLoansOrLines"]:
+        s = X_fe.loc[mk, c]
+        ok = s.notna()
+        rows.append((im, c, roc_auc_score(y[mk][ok], s[ok])))
+pd.DataFrame(rows, columns=["income_missing", "feature", "auc"]).pivot(
+    index="feature", columns="income_missing", values="auc").round(3)

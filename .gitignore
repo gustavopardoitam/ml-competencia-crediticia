@@ -9,3 +9,4 @@ data/
 artifacts/
 *.pkl
 *.joblib
+submissions/*.csv
