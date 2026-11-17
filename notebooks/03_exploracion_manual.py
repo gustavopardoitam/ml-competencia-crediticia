@@ -235,48 +235,99 @@ lin2 = pd.DataFrame({
 lin2.round(5)
 
 # %% [markdown]
-# ## 8. Decisiones (completar)
-# - Familias descartadas (ΔAUC dentro de ±2 SE): cohorte por edad, picos y redondez, exposición y composición,
-#   patrón de faltantes, frecuencia de ingreso, riesgo por segmento en el fold.
-# - Imputación: NaN nativo (la mediana no cambia el AUC).
-# - Set mínimo candidato:
-# - Qué limpieza solo importa para modelos lineales: colas, centinelas y transformaciones (0.700 a 0.856).
-# ## 6. Ablación hacia atrás: ¿cuál es el set mínimo que no pierde AUC?
+# ## 8. ¿Hay interacciones? Profundidad del árbol como diagnóstico
+# Si max_depth=1 (modelo aditivo) empata con max_depth=4, no hay interacciones que explotar.
+# Se escala n_estimators para que los árboles someros no queden subajustados (solo diagnóstico).
 
 # %%
-from features.features import clean  # noqa: E402
+N_EST = {1: 1200, 2: 600, 3: 400, 4: 300, 6: 200}
+rows = []
+for depth, n in N_EST.items():
+    a = fold_aucs(X_fe, lambda d=depth, n=n: xgb.XGBClassifier(**{**XGB, "max_depth": d, "n_estimators": n}))
+    rows.append((depth, n, a.mean(), (a - BASE).mean()))
+pd.DataFrame(rows, columns=["max_depth", "n_estimators", "auc", "delta_vs_base"]).round(5)
 
-clean_df = clean(train.drop(columns=[TARGET, ID]))
-GROUPS = {
-    "agregados de atrasos": ["total_late", "max_late", "any_late", "late_severity"],
-    "derivados de ingreso y deuda": ["log_income", "debt_ratio_valid", "debt_amount",
-                                     "log_debt_amount", "income_per_dep"],
-    "utilización derivada": ["util_clip", "util_gt1"],
-    "interacciones y estructura": ["non_re_lines", "age_x_util", "late_x_util"],
+# %% [markdown]
+# ## 9. Análisis de errores (predicciones fuera de muestra, 5 folds disjuntos)
+
+# %%
+oof = np.zeros(len(y))
+for tr, va in SPLITS[:5]:
+    m = xgb.XGBClassifier(**XGB).fit(X_fe.iloc[tr], y.iloc[tr])
+    oof[va] = m.predict_proba(X_fe.iloc[va])[:, 1]
+print("AUC OOF:", round(roc_auc_score(y, oof), 5))
+
+df = pd.DataFrame({"y": y, "p": oof, "age": X_fe["age"], "util": X_fe["util_clip"],
+                   "any_late": X_fe["any_late"], "income_missing": X_fe["income_missing"]})
+
+
+def slice_report(by):
+    g = df.groupby(by, observed=True)
+    return pd.DataFrame({
+        "n": g.size(), "tasa_real": g["y"].mean(), "pred_media": g["p"].mean(),
+        "auc": g.apply(lambda s: roc_auc_score(s["y"], s["p"]) if s["y"].nunique() == 2 else np.nan),
+    }).round(4)
+
+
+display(slice_report(pd.cut(df["age"], [17, 30, 40, 50, 60, 70, 110])))
+display(slice_report(pd.cut(df["util"], [-0.01, 0, 0.05, 0.3, 0.6, 1, 2])))
+display(slice_report("any_late"))
+display(slice_report("income_missing"))
+
+# %%
+fn = df[(df["y"] == 1) & (df["p"] < 0.02)]
+print(f"Positivos con p < 0.02: {len(fn)} de {int(df['y'].sum())} ({len(fn) / df['y'].sum():.1%})")
+cols = ["age", "util_clip", "total_late", "MonthlyIncome", "DebtRatio", "NumberOfOpenCreditLinesAndLoans"]
+display(X_fe.loc[fn.index, cols].describe().round(2))
+display(X_fe.loc[(df["y"] == 0), cols].describe().round(2))
+
+# %% [markdown]
+# ## 10. Confirmación en folds nuevos (semilla 7, 5×3) de los sets candidatos
+
+# %%
+SPLITS_NEW = list(RepeatedStratifiedKFold(n_splits=5, n_repeats=3, random_state=7).split(X_fe, y))
+
+
+def fold_aucs_new(X, factory=xgb_model):
+    return np.array([
+        roc_auc_score(y.iloc[va], factory().fit(X.iloc[tr], y.iloc[tr]).predict_proba(X.iloc[va])[:, 1])
+        for tr, va in SPLITS_NEW
+    ])
+
+
+SETS = {
+    "mínimo (limpias + total_late + any_late)": pd.concat([clean_df, X_fe[["total_late", "any_late"]]], axis=1),
+    "base completa": X_fe,
+    "base sin utilización derivada": X_fe.drop(columns=GROUPS["utilización derivada"]),
 }
-compare("solo crudas (sin limpieza)", train[RAW])
-compare("crudas limpias + banderas", clean_df)
-compare("mínimo: limpias + total_late + any_late",
-        pd.concat([clean_df, X_fe[["total_late", "any_late"]]], axis=1))
-for g, cols in GROUPS.items():
-    out = compare(f"base sin {g}", X_fe.drop(columns=cols))
-out
+fresh = {k: fold_aucs_new(v) for k, v in SETS.items()}
+ref = fresh["base completa"]
+pd.DataFrame({k: dict(n_cols=SETS[k].shape[1], auc=a.mean(), delta_vs_base=(a - ref).mean(),
+                      se=(a - ref).std(ddof=1) / np.sqrt(len(a))) for k, a in fresh.items()}).T.round(5)
 
 # %% [markdown]
-# ## 7. Regresión logística: qué features a mano ayudan a un modelo lineal
+# ### Ingreso faltante y centinelas: ¿explican el AUC alto del grupo?
 
 # %%
-extra_lin = pd.concat([X_lin, spikes[["util_eq0", "util_095_1"]],
-                       exposure[["has_90", "only_mild_late"]]], axis=1)
-lin2 = pd.DataFrame({
-    "modelo": ["logreg · limpias y transformadas", "+ util_eq0, util_095_1, has_90, only_mild_late"],
-    "auc": [fold_aucs(X_lin, logreg).mean(), fold_aucs(extra_lin, logreg).mean()]})
-lin2.round(5)
+sent = X_fe["late_sentinel"] == 1
+print(pd.crosstab(X_fe["income_missing"], sent, margins=True))
+for im in (0, 1):
+    mk = (df["income_missing"] == im) & ~sent
+    print(f"income_missing={im}, sin centinelas: n={mk.sum()}, AUC={roc_auc_score(df.loc[mk, 'y'], df.loc[mk, 'p']):.4f}")
 
 # %% [markdown]
-# ## 8. Decisiones (completar)
-# - Familias descartadas (ΔAUC dentro de ±2 SE): cohorte por edad, picos y redondez, exposición y composición,
+# ## 11. Decisiones
+# - Descartadas (ΔAUC dentro de ±2 SE): cohorte por edad, picos y redondez, exposición y composición,
 #   patrón de faltantes, frecuencia de ingreso, riesgo por segmento en el fold.
-# - Imputación: NaN nativo (la mediana no cambia el AUC).
-# - Set mínimo candidato:
-# - Qué limpieza solo importa para modelos lineales: colas, centinelas y transformaciones (0.700 a 0.856).
+# - Interacciones (sección 8): el modelo aditivo pierde 0.0025 (profundidad 1: 0.8627 vs profundidad 3-4: 0.8652).
+#   Las interacciones aportan como máximo ese 0.0025, ya capturado con profundidad 3 o 4; profundidad 6 empeora.
+# - Calibración (sección 9): la predicción media coincide con la tasa real en todos los cortes.
+# - Subgrupos: AUC 0.831 (17-30) y 0.841 (30-40) frente a 0.854-0.856 de 40 años en adelante.
+#   Tasa de impago más alta en jóvenes (11.9%). Reportar en el análisis de equidad.
+# - Errores irreducibles: 520 de 7,018 positivos (7.4%) reciben p < 0.02 y su perfil se parece al de los
+#   no deudores típicos (utilización mediana 0.06, sin atrasos).
+# - Ingreso faltante: AUC 0.901 vs 0.855 con ingreso; ver la celda de centinelas.
+# - Folds nuevos (semilla 7, 5x3): mínimo (16 columnas) = base completa (28) = 0.86529. El +0.00024 de
+#   quitar la utilización derivada no se replicó (efecto de elegir el mejor entre varios).
+# - SET CANDIDATO FINAL: mínimo de 16 columnas (`prepare_min`): originales limpias, 4 banderas,
+#   total_late y any_late.

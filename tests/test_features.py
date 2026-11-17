@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from features.features import prepare
+from features.features import prepare, prepare_min
 
 
 def _row(**kw):
@@ -43,3 +43,9 @@ def test_row_independence_no_leakage():
     full = prepare(df)
     single = prepare(df.iloc[[1]])
     pd.testing.assert_frame_equal(full.iloc[[1]], single)
+
+
+def test_prepare_min_columns():
+    out = prepare_min(pd.DataFrame([_row()]))
+    assert out.shape[1] == 16
+    assert not {"util_clip", "debt_amount", "late_x_util"} & set(out.columns)

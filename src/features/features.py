@@ -58,3 +58,14 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
 def prepare(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop(columns=[TARGET, ID], errors="ignore")
     return add_features(clean(df))
+
+
+FLAGS = ["late_sentinel", "income_missing", "income_zero", "dependents_missing"]
+MIN_EXTRA = ["total_late", "any_late"]
+
+
+def prepare_min(df: pd.DataFrame) -> pd.DataFrame:
+    """Set candidato mínimo (16 columnas): originales limpias + banderas + total_late + any_late."""
+    full = prepare(df)
+    raw_cols = [c for c in df.columns if c not in (TARGET, ID)]
+    return full[raw_cols + FLAGS + MIN_EXTRA]
