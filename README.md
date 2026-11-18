@@ -125,3 +125,30 @@ El EDA de `01_eda.ipynb` reportó correlación casi nula para `NumberOfOpenCredi
 - **Baseline lineal** (regresión logística) sobre las features transformadas/discretizadas arriba — necesario precisamente porque varias variables no son monótonas.
 - **Modelo principal: LightGBM** — captura de forma nativa las relaciones en forma de "U" y la interacción edad × utilización sin ingeniería manual extensa.
 - **Validación:** `StratifiedKFold` (repetida) por el desbalance moderado; métrica AUC-ROC. Sin evidencia de drift train/test, por lo que el CV local es representativo del leaderboard.
+
+## Ingeniería de variables y modelos (línea JAE)
+
+El detalle está en la carpeta [`docs/`](docs/):
+
+| Documento | Contenido |
+| --- | --- |
+| [`docs/plan_ingenieria_variables.md`](docs/plan_ingenieria_variables.md) | Plan de ingeniería de variables derivado de `notebooks/02_eda.ipynb`: principios, imputación del ingreso (⭐ B: edad + decil del monto de deuda; 🔷 C como alternativa), escalado y propuesta por variable. Implementado en `src/features/engineering_jae.py` y `notebooks/03_ingenieria_variables_jae.ipynb`. |
+| [`docs/aprendizajes_iteracion_05.md`](docs/aprendizajes_iteracion_05.md) | Aprendizajes de la iteración 05 (`notebooks/05_mejora_modelos_jae.ipynb`): traza de iteraciones, comparación de variables JAE contra FE (`features.prepare()`) y siguientes pasos. |
+
+### Mejor modelo hasta el momento
+
+| Modelo | AUC validación cruzada | Kaggle |
+| --- | --- | --- |
+| XGBoost 2b (`notebooks/04_modelos_base_jae.ipynb`) | 0.86586 ± 0.00322 | 0.87992 |
+| **Entrega B**: mezcla 50/50 de XGBoost JAE y XGBoost FE, 5 semillas cada uno (`notebooks/05_mejora_modelos_jae.ipynb`) | **0.86663** (gana a 2b en los 5 folds) | por registrar |
+
+### Variables que podrían mejorar el modelo
+
+Según la comparación de la sección 4 de `docs/aprendizajes_iteracion_05.md`:
+
+- **De FE para agregar a JAE:** las interacciones `age_x_util` y
+  `late_x_util`, `non_re_lines` (líneas abiertas − créditos hipotecarios) y
+  `max_late` (máximo de los tres atrasos). Son la explicación más probable de
+  que FE rindiera +0.00025 más que JAE con el mismo modelo.
+- **De JAE para conservar:** `disposable_income_clip` (ingreso − monto de
+  deuda), la variable nueva con más señal del EDA (IV 0.161).
