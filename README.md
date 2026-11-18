@@ -143,6 +143,7 @@ El detalle está en la carpeta [`docs/`](docs/):
 | **Entrega B**: mezcla 50/50 de XGBoost JAE y XGBoost FE, 5 semillas cada uno (`notebooks/05_mejora_modelos_jae.ipynb`) | **0.86663** (gana a 2b en los 5 folds) | **0.88012** |
 | Entrega C: como la B, con JAE + interacciones (`notebooks/06_interacciones_jae.ipynb`) | 0.86666 (empata con B: +0.00003, 3 de 5 folds) | — |
 | Entrega D: como la C, sin `disposable_income_clip` ni `total_late` (25 variables JAE; selección exploratoria, pendiente de notebook 07) | 0.86676 (+0.00013 sobre B, 4 de 5 folds) | 0.87996 |
+| **Entrega F**: 70 % entrega D + 30 % CatBoost, mezcla por rangos (selección exploratoria, pendiente de notebook 07) | **0.86698** (+0.00035 sobre B, 5 de 5 folds) | **0.88016** (3.er lugar, también en el privado) |
 
 ### Variables de FE incorporadas al conjunto JAE
 
