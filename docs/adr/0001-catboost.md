@@ -45,5 +45,5 @@ catboost`). Se usa como miembro de mezcla, no como modelo principal.
   transitivas).
 - CatBoost escribe artefactos de entrenamiento en `catboost_info/`; se agregó a
   `.gitignore`.
-- Pendiente: pasar el experimento de scripts exploratorios a un notebook con
-  trazabilidad (notebook 07).
+- El experimento completo, con trazabilidad y validación en una partición
+  independiente, está en `notebooks/07_seleccion_catboost_jae.ipynb`.
