@@ -140,15 +140,23 @@ El detalle está en la carpeta [`docs/`](docs/):
 | Modelo | AUC validación cruzada | Kaggle |
 | --- | --- | --- |
 | XGBoost 2b (`notebooks/04_modelos_base_jae.ipynb`) | 0.86586 ± 0.00322 | 0.87992 |
-| **Entrega B**: mezcla 50/50 de XGBoost JAE y XGBoost FE, 5 semillas cada uno (`notebooks/05_mejora_modelos_jae.ipynb`) | **0.86663** (gana a 2b en los 5 folds) | por registrar |
+| **Entrega B**: mezcla 50/50 de XGBoost JAE y XGBoost FE, 5 semillas cada uno (`notebooks/05_mejora_modelos_jae.ipynb`) | **0.86663** (gana a 2b en los 5 folds) | **0.88012** |
+| Entrega C: como la B, con JAE + interacciones (`notebooks/06_interacciones_jae.ipynb`) | 0.86666 (empata con B: +0.00003, 3 de 5 folds) | — |
+| Entrega D: como la C, sin `disposable_income_clip` ni `total_late` (25 variables JAE; selección exploratoria, pendiente de notebook 07) | 0.86676 (+0.00013 sobre B, 4 de 5 folds) | 0.87996 |
 
-### Variables que podrían mejorar el modelo
+### Variables de FE incorporadas al conjunto JAE
 
-Según la comparación de la sección 4 de `docs/aprendizajes_iteracion_05.md`:
+Según la comparación de la sección 4 de `docs/aprendizajes_iteracion_05.md`,
+las variables de FE con información nueva para los árboles eran
+`age_x_util`, `late_x_util`, `non_re_lines` y `max_late`. Desde
+`notebooks/06_interacciones_jae.ipynb` forman parte del conjunto JAE
+(`FeatureConfig(interactions=True)`) y del dataset de entrenamiento
+`data/processed/jae/train_jae.parquet` (30 variables):
 
-- **De FE para agregar a JAE:** las interacciones `age_x_util` y
-  `late_x_util`, `non_re_lines` (líneas abiertas − créditos hipotecarios) y
-  `max_late` (máximo de los tres atrasos). Son la explicación más probable de
-  que FE rindiera +0.00025 más que JAE con el mismo modelo.
-- **De JAE para conservar:** `disposable_income_clip` (ingreso − monto de
-  deuda), la variable nueva con más señal del EDA (IV 0.161).
+- Mejoran al XGBoost JAE en +0.00015 (dentro del ruido) y cierran cerca del
+  60 % de la distancia con el conjunto FE.
+- El modelo las usa mucho (`late_x_util` es la variable de mayor ganancia),
+  pero sustituyen a los atrasos y la utilización que ya existían, en lugar de
+  aportar información nueva.
+- `disposable_income_clip` (ingreso − monto de deuda), la variable nueva con
+  más señal del EDA (IV 0.161), se conserva.

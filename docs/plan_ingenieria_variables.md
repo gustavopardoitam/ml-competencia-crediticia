@@ -21,6 +21,11 @@ Diferencias contra el plan original:
 - El ingreso = 1 se trata como ingreso 0: indicador `income_placeholder`,
   fuera del ajuste de las medianas y con `DebtRatio` leído como monto.
 - Se agregó el ingreso por dependiente (`per_dependent_<ingreso>`).
+- Se agregaron cuatro interacciones de `features.features` (`age_x_util`,
+  `late_x_util`, `non_re_lines` y `max_late`), activables con
+  `FeatureConfig(interactions=True)` e incluidas en el dataset de
+  entrenamiento. Su efecto se mide en `notebooks/06_interacciones_jae.ipynb`:
+  +0.00015 sobre la entrega A, dentro del ruido.
 
 Resultados principales (AUC, validación cruzada de 5 folds):
 regresión logística 0.700 con variables crudas → **0.8568** con la propuesta;

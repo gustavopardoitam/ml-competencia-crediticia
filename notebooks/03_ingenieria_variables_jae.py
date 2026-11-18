@@ -668,6 +668,7 @@ plt.show()
 # | Escalado | `log1p` + `StandardScaler` | Ninguno |
 # | Atrasos | Conteo recortado + `log1p` | Conteo recortado |
 # | Variables nuevas | Ingreso disponible + ingreso por dependiente + `util_zero` + `thin_file` | Igual |
+# | Interacciones de FE | No | `age_x_util`, `late_x_util`, `non_re_lines` y `max_late` |
 #
 # **Qué se guarda:** un solo dataset **sin escalar** con todas las variables
 # construidas, incluidas las dos versiones del ingreso (⭐ B y 🔷 C) y sus
@@ -678,9 +679,18 @@ plt.show()
 #
 # Junto al dataset se guarda `features_jae.json` con las listas de columnas
 # recomendadas para cada tipo de modelo.
+#
+# **Interacciones de FE.** El dataset incluye cuatro variables de
+# `features.features` (`age_x_util`, `late_x_util`, `non_re_lines` y
+# `max_late`), calculadas sobre los datos limpios de este módulo
+# (`FeatureConfig(interactions=True)`). Son la explicación más probable de que
+# el conjunto FE rindiera +0.00025 más que el JAE en el notebook 05
+# (`docs/aprendizajes_iteracion_05.md`, sección 4); su efecto se mide en
+# `notebooks/06_interacciones_jae.ipynb`. Los experimentos de las secciones 3
+# a 7 no las usan, para que sus cifras sigan siendo comparables.
 
 # %%
-config_dataset = FeatureConfig(for_trees=True, income_strategy="BC")
+config_dataset = FeatureConfig(for_trees=True, income_strategy="BC", interactions=True)
 preprocesador_dataset = build_preprocessor(config_dataset).fit(X, y)
 dataset_train = preprocesador_dataset.transform(X)
 dataset_test = preprocesador_dataset.transform(X_test)
@@ -696,7 +706,8 @@ assert len(dataset_test) == len(test_raw), "test cambió de tamaño"
 assert dataset_train[ID].is_unique and dataset_test[ID].is_unique, "Id repetidos"
 assert list(dataset_test.columns) == [ID, *columnas_modelo], "train y test no coinciden"
 assert not np.isinf(dataset_train[columnas_modelo].to_numpy()).any(), "Hay infinitos"
-faltantes_permitidos = {AGE}  # edad < 18: los pipelines lineales la imputan
+# Edad < 18 (y su interacción con la utilización): los pipelines lineales la imputan
+faltantes_permitidos = {AGE, "age_x_util"}
 faltantes = {
     c
     for c in columnas_modelo
@@ -740,7 +751,7 @@ especificacion = {
         "nota": "Imputar edad con la mediana; usar build_preprocessor en CV.",
     },
     "arboles": {
-        "config": asdict(BASE_ARBOLES),
+        "config": asdict(replace(BASE_ARBOLES, interactions=True)),
         # La base de árboles usa solo ⭐ B: se excluyen las variables de 🔷 C
         "columnas": [
             c for c in columnas_modelo if "income_imp_age_lines_dep" not in c
@@ -803,8 +814,9 @@ print(
 # **Dataset propuesto (`data/processed/jae/`, no se versiona; se regenera
 # corriendo este notebook):**
 # - `train_jae.parquet` (105,000 filas) y `test_jae.parquet` (45,000 filas):
-#   `Id`, 26 variables y el objetivo (solo en train). Un solo faltante: la edad
-#   inválida de train.
+#   `Id`, 30 variables y el objetivo (solo en train), incluidas las cuatro
+#   interacciones de FE. Solo falta la edad inválida de train (en `age` y
+#   `age_x_util`).
 # - `features_jae.json`: columnas recomendadas y tratamiento para modelos
 #   lineales y de árboles, con el AUC de referencia.
 # - AUC de referencia (5 folds): **lineal 0.8568 · árboles 0.8626**.

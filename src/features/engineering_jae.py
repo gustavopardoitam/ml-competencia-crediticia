@@ -92,6 +92,8 @@ CLEAN_FLAGS = [
 ]
 BASE_FLAGS = [*CLEAN_FLAGS, "util_gt1"]
 PROFILE_FLAGS = ["util_zero", "thin_file"]
+# Interacciones tomadas de features.features (iteración 05, sección 4.4)
+INTERACTION_FEATURES = ["age_x_util", "late_x_util", "non_re_lines", "max_late"]
 INCOME_OUTPUTS = {
     "global": "income_imp_global",
     "A": "income_imp_age_mortgage",
@@ -188,6 +190,12 @@ def add_fixed_features(df: pd.DataFrame) -> pd.DataFrame:
     out["total_late"] = late.sum(axis=1)
     out["any_late"] = (out["total_late"] > 0).astype(int)
     out["late_severity"] = late[LATE30] + 2 * late[LATE60] + 3 * late[LATE90]
+    out["max_late"] = late.max(axis=1)
+
+    # Interacciones (mismas definiciones que features.features, sobre datos limpios)
+    out["age_x_util"] = out[AGE] * out["util_clip"]
+    out["late_x_util"] = out["total_late"] * out["util_clip"]
+    out["non_re_lines"] = out[OPEN_LINES] - out[REAL_ESTATE]
 
     out["thin_file"] = (
         (out["total_late"] == 0)
@@ -529,6 +537,10 @@ class FeatureConfig:
         disposable_income: Si se agrega el ingreso disponible.
         income_per_dependent: Si se agrega el ingreso por dependiente.
         profile_flags: Si se agregan ``util_zero`` y ``thin_file``.
+        interactions: Si se agregan ``age_x_util``, ``late_x_util``,
+            ``non_re_lines`` y ``max_late``. Desactivado por omisión para que
+            los experimentos de los notebooks 03 a 05 se reproduzcan igual.
+            La representación ``woe`` no las usa.
         for_trees: Si el preprocesamiento es para modelos de árboles (sin
             escalado).
         impute_for_trees: En árboles, si se imputa o se dejan los ``NaN``.
@@ -541,6 +553,7 @@ class FeatureConfig:
     disposable_income: bool = True
     income_per_dependent: bool = True
     profile_flags: bool = True
+    interactions: bool = False
     for_trees: bool = False
     impute_for_trees: bool = True
 
@@ -642,6 +655,10 @@ def feature_groups(config: FeatureConfig) -> dict[str, list[str]]:
         "plain": ["util_clip", AGE, "open_lines", "real_estate", "dependents"],
         "flags": [*BASE_FLAGS, *(PROFILE_FLAGS if config.profile_flags else [])],
     }
+    if config.interactions:
+        # age_x_util y non_re_lines pueden ser 0 o negativas: sin logaritmo
+        groups["plain"] += ["age_x_util", "non_re_lines"]
+        groups["log"] += ["late_x_util", "max_late"]
     if config.late_mode == "count":
         groups["log"] += late_count
     else:
