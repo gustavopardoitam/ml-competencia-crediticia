@@ -11,6 +11,7 @@ from features.engineering_jae import (
     DEBT_RATIO,
     DEPENDENTS,
     INCOME,
+    INTERACTION_FEATURES,
     LATE30,
     LATE60,
     LATE90,
@@ -318,6 +319,7 @@ def test_estrategia_bc_produce_las_dos_variables_de_ingreso(
         FeatureConfig(income_strategy="global", scaler="robust"),
         FeatureConfig(representation="woe"),
         FeatureConfig(representation="splines", scaler="quantile"),
+        FeatureConfig(interactions=True),
     ],
 )
 def test_preprocesador_lineal_no_deja_faltantes(
@@ -338,3 +340,29 @@ def test_preprocesador_de_arboles_sin_imputar_conserva_faltantes(
     assert out["income_clip"].isna().sum() == 1
     assert "income_imp_age_debt" not in out.columns
     assert "per_dependent_income_clip" in out.columns
+
+
+def test_interacciones_usan_los_datos_limpios(raw: pd.DataFrame) -> None:
+    out = prepare_fixed(raw)
+    # Fila 4: atrasos 2 + 0 + 1, utilización 0.2 y edad 25
+    assert out.loc[4, "max_late"] == 2
+    assert out.loc[4, "late_x_util"] == pytest.approx(3 * 0.2)
+    assert out.loc[4, "age_x_util"] == pytest.approx(25 * 0.2)
+    # Fila 3: utilización recortada a 2; fila 2: códigos 96/98 llevados a 0
+    assert out.loc[3, "age_x_util"] == pytest.approx(60 * 2.0)
+    assert out.loc[2, "max_late"] == 0
+    # Edad inválida → interacción faltante; más hipotecas que líneas → negativo
+    assert np.isnan(out.loc[0, "age_x_util"])
+    assert out.loc[5, "non_re_lines"] == -1
+
+
+def test_interacciones_solo_entran_al_modelo_si_se_activan(
+    raw: pd.DataFrame,
+) -> None:
+    datos = prepare_fixed(raw)
+    base = FeatureConfig(for_trees=True, impute_for_trees=False)
+    sin = build_preprocessor(base).fit_transform(datos)
+    con = build_preprocessor(replace(base, interactions=True)).fit_transform(datos)
+    assert not set(INTERACTION_FEATURES) & set(sin.columns)
+    assert set(INTERACTION_FEATURES) <= set(con.columns)
+    assert con.shape[1] == sin.shape[1] + 4

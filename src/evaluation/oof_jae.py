@@ -385,7 +385,8 @@ def registrar_en_bitacora(
     """Registra un experimento en la bitácora del equipo sin duplicarlo.
 
     Si ya existe una fila con el mismo nombre (por ejemplo, al volver a correr un
-    notebook), se reemplaza en lugar de agregar otra.
+    notebook), se reemplaza en lugar de agregar otra y se conserva su
+    ``kaggle_score``, que solo se anota a mano al subir la entrega.
 
     Args:
         resultado: Resultado de :func:`evaluar_modelo`.
@@ -398,15 +399,20 @@ def registrar_en_bitacora(
         Bitácora completa después de registrar el experimento.
     """
     bitacora = read_log(log_path)
-    if not bitacora.empty and (bitacora["nombre"] == resultado.nombre).any():
+    kaggle_score: float | None = None
+    previo = bitacora["nombre"] == resultado.nombre if not bitacora.empty else None
+    if previo is not None and previo.any():
         logger.info("Se reemplaza el registro previo de %s", resultado.nombre)
-        bitacora[bitacora["nombre"] != resultado.nombre].to_csv(log_path, index=False)
+        puntajes = bitacora.loc[previo, "kaggle_score"].dropna()
+        kaggle_score = float(puntajes.iloc[-1]) if not puntajes.empty else None
+        bitacora[~previo].to_csv(log_path, index=False)
     return log_experiment(
         nombre=resultado.nombre,
         features=features,
         modelo=modelo,
         cv_auc_mean=resultado.auc_media,
         cv_auc_std=resultado.auc_std,
+        kaggle_score=kaggle_score,
         notas=notas,
         log_path=log_path,
     )

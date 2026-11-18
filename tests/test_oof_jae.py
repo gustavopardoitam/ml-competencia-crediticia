@@ -107,6 +107,22 @@ def test_registrar_reemplaza_el_experimento_repetido(
     assert (read_log(bitacora)["nombre"] == "jae_prueba").sum() == 1
 
 
+def test_registrar_conserva_el_puntaje_de_kaggle(
+    datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold, tmp_path: Path
+) -> None:
+    X, y = datos
+    bitacora = tmp_path / "experiments.csv"
+    resultado = evaluar_modelo(LogisticRegression(), X, y, "jae_prueba", cv=cv)
+    registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
+    anotada = read_log(bitacora)
+    anotada.loc[anotada["nombre"] == "jae_prueba", "kaggle_score"] = 0.88
+    anotada.to_csv(bitacora, index=False)
+    registrar_en_bitacora(resultado, "x1, x2", "logística", log_path=bitacora)
+    fila = read_log(bitacora).query("nombre == 'jae_prueba'")
+    assert len(fila) == 1
+    assert fila["kaggle_score"].iloc[0] == pytest.approx(0.88)
+
+
 def test_combinar_promedia_las_probabilidades_oof(
     datos: tuple[pd.DataFrame, pd.Series], cv: StratifiedKFold
 ) -> None:
