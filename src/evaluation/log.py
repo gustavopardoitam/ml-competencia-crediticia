@@ -40,3 +40,14 @@ def read_log(log_path: Path = LOG_PATH) -> pd.DataFrame:
     if not log_path.exists():
         return pd.DataFrame(columns=COLUMNS)
     return pd.read_csv(log_path)
+
+
+def set_kaggle_score(nombre: str, kaggle_score: float, log_path: Path = LOG_PATH) -> pd.DataFrame:
+    """Anota el score de Kaggle en el registro más reciente con ese `nombre`."""
+    df = read_log(log_path)
+    matches = df.index[df["nombre"] == nombre]
+    if len(matches) == 0:
+        raise KeyError(f"no hay ningún experimento '{nombre}' en {log_path}")
+    df.loc[matches[-1], "kaggle_score"] = kaggle_score
+    df.to_csv(log_path, index=False)
+    return df

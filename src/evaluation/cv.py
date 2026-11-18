@@ -13,11 +13,11 @@ def get_cv(n_splits: int = N_SPLITS, random_state: int = RANDOM_STATE) -> Strati
     return StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
 
 
-def evaluate(model, X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold | None = None) -> tuple[float, float]:
-    """Entrena `model` en cada fold de `cv` y mide AUC-ROC en el fold de validación.
+def evaluate_folds(model, X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold | None = None) -> np.ndarray:
+    """Entrena `model` en cada fold de `cv` y devuelve el AUC-ROC de cada fold de validación.
 
-    Devuelve (auc_media, auc_std) sobre los folds. `model` debe soportar
-    `fit`/`predict_proba` (p. ej. LGBMClassifier, LogisticRegression, o un Pipeline).
+    Útil para comparar dos experimentos fold por fold (misma partición): la diferencia
+    pareada es más sensible que comparar contra la std entre folds.
     """
     cv = cv if cv is not None else get_cv()
     scores = []
@@ -28,5 +28,14 @@ def evaluate(model, X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold | None = 
         est.fit(X_train, y_train)
         proba = est.predict_proba(X_val)[:, 1]
         scores.append(roc_auc_score(y_val, proba))
-    scores = np.array(scores)
+    return np.array(scores)
+
+
+def evaluate(model, X: pd.DataFrame, y: pd.Series, cv: StratifiedKFold | None = None) -> tuple[float, float]:
+    """Entrena `model` en cada fold de `cv` y mide AUC-ROC en el fold de validación.
+
+    Devuelve (auc_media, auc_std) sobre los folds. `model` debe soportar
+    `fit`/`predict_proba` (p. ej. LGBMClassifier, LogisticRegression, o un Pipeline).
+    """
+    scores = evaluate_folds(model, X, y, cv)
     return scores.mean(), scores.std()

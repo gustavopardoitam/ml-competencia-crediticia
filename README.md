@@ -15,50 +15,75 @@ Predicción de P(SeriousDlqin2yrs = 1). Métrica: AUC-ROC.
 
 Todo experimento (combinación de features + modelo) se mide con la misma partición de cross-validation y se registra en una bitácora compartida, para poder comparar resultados de forma justa entre todo el equipo.
 
-### 1. Evaluar
+### 1. Evaluar y registrar
 
 ```python
 import pandas as pd
 from lightgbm import LGBMClassifier
-from features.features import prepare  # o elñ conjunto de variables que usaron
-from evaluation import evaluate
+from features.features import prepare  # o el conjunto de variables que usaron
+from evaluation import run_experiment
 
 train = pd.read_csv("data/raw/train.csv")
 y = train["SeriousDlqin2yrs"]
 X = prepare(train)  # DataFrame numérico, sin Id ni target; los NaN se dejan tal cual
 
-auc_mean, auc_std = evaluate(LGBMClassifier(random_state=985), X, y)
-print(f"AUC: {auc_mean:.4f} +/- {auc_std:.4f}")
-```
-
-`evaluate(model, X, y)` entrena `model` en 5 folds estratificados (siempre los mismos, ver `RANDOM_STATE` en `src/evaluation/cv.py`) y devuelve `(auc_media, auc_std)`. Acepta cualquier modelo con `.fit`/`.predict_proba`: `LGBMClassifier`, `LogisticRegression`, un `Pipeline` con WOE-encoding, etc.
-
-### 2. Registrar el experimento
-
-```python
-from evaluation import log_experiment
-
-log_experiment(
-    nombre="baseline_lightgbm",
-    features="prepare() - 28 columnas",
-    modelo="LGBMClassifier default",
-    cv_auc_mean=auc_mean,
-    cv_auc_std=auc_std,
-    kaggle_score=None,  # se llena al subir el submission a Kaggle
+folds = run_experiment(
+    "baseline_lightgbm", LGBMClassifier(random_state=985), X, y,
+    features_desc="prepare() - 28 columnas",
     notas="piso de comparación",
 )
 ```
 
-Cada llamada agrega una fila a `reports/experiments.csv` (se sube al repo para que el equipo vea el historial). Para revisarlo:
+`run_experiment` entrena el modelo en 5 folds estratificados (siempre los mismos, ver `RANDOM_STATE` en `src/evaluation/cv.py`), imprime el AUC, agrega una fila a `reports/experiments.csv` y devuelve el AUC de cada fold. Acepta cualquier modelo con `.fit`/`.predict_proba`: `LGBMClassifier`, `LogisticRegression`, un `Pipeline`, un `VotingClassifier`, etc.
+
+Si un paso usa el target (WOE, target encoding, selección de variables), debe ir **dentro** de un `Pipeline`: así se ajusta solo con el train de cada fold y no hay leakage.
+
+Piezas sueltas, por si se necesitan por separado:
+- `evaluate(model, X, y)` → `(auc_media, auc_std)`, sin registrar.
+- `evaluate_folds(model, X, y)` → AUC de cada fold, sin registrar.
+- `log_experiment(nombre, features, modelo, cv_auc_mean, cv_auc_std, kaggle_score=None, notas="")` → registra a mano.
+
+Para revisar la bitácora:
 
 ```python
 from evaluation import read_log
 read_log().sort_values("cv_auc_mean", ascending=False)
 ```
 
-### 3. Sugerencia para comparar experimentos
+### 2. Comparar experimentos
 
-Cambia **una sola cosa** entre un experimento y el siguiente (o las features, o el modelo, no ambos), para saber qué causó la diferencia. Si la mejora en `cv_auc_mean` es menor que `cv_auc_std`, probablemente es ruido del split y no una mejora real, hace falta algo más grande para confiar en ella.
+Cambia **una sola cosa** entre un experimento y el siguiente (o las features, o el modelo, no ambos), para saber qué causó la diferencia.
+
+Como todos los experimentos usan la misma partición, conviene compararlos **fold por fold**. Es más sensible que comparar la mejora contra `cv_auc_std`, que incluye la variación de qué tan difícil es cada fold:
+
+```python
+from evaluation import paired_comparison
+
+paired_comparison({"lightgbm_nuevo": folds_nuevo}, reference=folds_baseline)
+#                 mejora_media  std_pareada  folds_que_mejoran
+# lightgbm_nuevo       0.00299      0.00070                  5
+```
+
+Una mejora es confiable si `mejora_media` es varias veces `std_pareada` y mejora en (casi) todos los folds. Si se eligen hiperparámetros o pesos con esta misma partición, la mejora sale algo optimista: para búsquedas, usa otra partición (`get_cv(random_state=42)`) y mide al final con la estándar.
+
+### 3. Generar el submission y anotar el score de Kaggle
+
+```python
+from evaluation import set_kaggle_score
+from inference import make_submission
+
+test = pd.read_csv("data/raw/test.csv")
+sample = pd.read_csv("data/raw/sample_submission.csv")
+
+make_submission(
+    LGBMClassifier(random_state=985), X, y, prepare(test), test["Id"], sample,
+    "submission_baseline_lightgbm.csv",
+)
+# ... subir data/processed/submission_baseline_lightgbm.csv a Kaggle, y luego:
+set_kaggle_score("baseline_lightgbm", 0.87884)
+```
+
+`make_submission` entrena con el 100% de `train`, predice `test` (que solo se transforma, sin volver a ajustar nada), valida que el formato y los `Id` coincidan con `sample_submission.csv` y guarda el CSV en `data/processed/` (fuera de git). `set_kaggle_score` anota el score en el registro más reciente con ese nombre.
 
 ## EDA: hallazgos, hipótesis y decisiones
 
