@@ -9,3 +9,6 @@ data/
 artifacts/
 *.pkl
 *.joblib
+
+# Artefactos de entrenamiento de CatBoost
+catboost_info/
