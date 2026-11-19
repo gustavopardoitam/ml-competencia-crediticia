@@ -2,6 +2,31 @@
 
 Predicción de P(SeriousDlqin2yrs = 1). Métrica: AUC-ROC.
 
+## 🥈 Resultado final: 2.º lugar
+
+El equipo **Data Sapiens** obtuvo el **2.º lugar** de la competencia, con
+**AUC privado de 0.86509**: subió un lugar respecto a la tabla pública y quedó
+a 0.00058 del primero.
+
+**Modelo ganador (entrega F):** ensamble de tres modelos de árboles: dos
+XGBoost, uno sobre el conjunto de variables JAE (25 variables) y otro sobre el
+conjunto FE (28 variables), y un CatBoost. Los dos XGBoost se promedian 50/50
+y el resultado se mezcla por rangos con CatBoost (70 % / 30 %). La ingeniería
+de variables limpia los códigos 96/98 de atrasos, lee `DebtRatio` como monto
+de deuda cuando falta el ingreso, conserva el ingreso faltante como señal y
+agrega interacciones de atrasos × utilización, que son las variables más
+usadas por el modelo.
+
+La explicación completa, con el flujo del ensamble y la imputación del ingreso,
+está en [`docs/modelo_ganador.md`](docs/modelo_ganador.md).
+
+| Entrega | AUC validación cruzada | AUC público | AUC privado |
+| --- | --- | --- | --- |
+| XGBoost 2b | 0.86586 | 0.87992 | 0.86411 |
+| Entrega B | 0.86663 | 0.88012 | 0.86463 |
+| Entrega D | 0.86676 | 0.87996 | 0.86476 |
+| **Entrega F (ganadora)** | **0.86698** | **0.88016** | **0.86509** |
+
 ## Setup
 `uv sync --frozen`. Los datos van en `data/raw/` y no se versionan.
 
@@ -134,6 +159,7 @@ El detalle está en la carpeta [`docs/`](docs/):
 | --- | --- |
 | [`docs/plan_ingenieria_variables.md`](docs/plan_ingenieria_variables.md) | Plan de ingeniería de variables derivado de `notebooks/02_eda.ipynb`: principios, imputación del ingreso (⭐ B: edad + decil del monto de deuda; 🔷 C como alternativa), escalado y propuesta por variable. Implementado en `src/features/engineering_jae.py` y `notebooks/03_ingenieria_variables_jae.ipynb`. |
 | [`docs/aprendizajes_iteracion_05.md`](docs/aprendizajes_iteracion_05.md) | Aprendizajes de la iteración 05 (`notebooks/05_mejora_modelos_jae.ipynb`): traza de iteraciones, comparación de variables JAE contra FE (`features.prepare()`) y siguientes pasos. |
+| [`docs/modelo_ganador.md`](docs/modelo_ganador.md) | 🥈 Explicación sencilla del modelo ganador (2.º lugar): ingeniería de variables, imputación del ingreso, flujo y características del ensamble. |
 
 ### Mejor modelo hasta el momento
 
@@ -143,7 +169,7 @@ El detalle está en la carpeta [`docs/`](docs/):
 | **Entrega B**: mezcla 50/50 de XGBoost JAE y XGBoost FE, 5 semillas cada uno (`notebooks/05_mejora_modelos_jae.ipynb`) | **0.86663** (gana a 2b en los 5 folds) | **0.88012** |
 | Entrega C: como la B, con JAE + interacciones (`notebooks/06_interacciones_jae.ipynb`) | 0.86666 (empata con B: +0.00003, 3 de 5 folds) | — |
 | Entrega D: como la C, sin `disposable_income_clip` ni `total_late` (25 variables JAE; `notebooks/07_seleccion_catboost_jae.ipynb`) | 0.86676 (+0.00013 sobre B, 4 de 5 folds) | 0.87996 |
-| **Entrega F**: 70 % entrega D + 30 % CatBoost, mezcla por rangos (`notebooks/07_seleccion_catboost_jae.ipynb`) | **0.86698** (+0.00035 sobre B, 5 de 5 folds) | **0.88016** (3.er lugar, también en el privado) |
+| **Entrega F**: 70 % entrega D + 30 % CatBoost, mezcla por rangos (`notebooks/07_seleccion_catboost_jae.ipynb`) | **0.86698** (+0.00035 sobre B, 5 de 5 folds) | **0.88016** (privado 0.86509: 2.º lugar final) |
 
 ### Variables de FE incorporadas al conjunto JAE
 
