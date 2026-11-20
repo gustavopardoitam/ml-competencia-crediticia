@@ -36,8 +36,8 @@
 # usó para elegir nada.
 #
 # **Resultado en Kaggle:** la entrega F fue la mejor del equipo en el
-# leaderboard público (0.88016) y el equipo mantuvo el tercer lugar en el
-# privado.
+# leaderboard público (0.88016) y en el privado (0.86509), con la que el
+# equipo obtuvo el 2.º lugar final.
 
 # %% [markdown]
 # ## 0. Preparación
@@ -867,8 +867,9 @@ display(pd.DataFrame(filas))
 #   escenarios y contra B en cerca del 5 %. Que la D quedara por debajo de la
 #   B en el público era posible por puro azar.
 # - **Consecuencia:** las decisiones se toman con la validación cruzada (y una
-#   partición independiente), no con el puntaje público. El equipo mantuvo el
-#   tercer lugar del público en el privado, lo que indica que el modelo no
+#   partición independiente), no con el puntaje público. En el privado el
+#   equipo subió del 3.er al 2.º lugar y la D quedó arriba de la B (0.86476
+#   contra 0.86463), el mismo orden de la validación cruzada: el modelo no
 #   estaba sobreajustado al leaderboard.
 
 # %% [markdown]
@@ -1077,8 +1078,8 @@ print(f"Tiempo total: {time.time() - INICIO:.0f} s")
 # 4. **CatBoost aporta diversidad real.** Solo es peor que XGBoost, pero en
 #    mezcla (30 %) mejora la entrega D en los 5 folds. Es la mayor mejora
 #    desde el notebook 05.
-# 5. **La entrega F fue la mejor en el leaderboard público (0.88016) y el
-#    equipo mantuvo el tercer lugar en el privado.**
+# 5. **La entrega F fue la mejor en el leaderboard público (0.88016) y en el
+#    privado (0.86509); con ella el equipo obtuvo el 2.º lugar final.**
 # 6. **El puntaje público es ruidoso** (desviación estándar de 0.004 a 0.006):
 #    la selección de entregas se hace con la validación cruzada y con una
 #    partición independiente que no se usó para elegir.

@@ -36,8 +36,9 @@ catboost`). Se usa como miembro de mezcla, no como modelo principal.
 - La entrega F gana a la D en los 5 folds de la partición del equipo
   (+0.00022) y en 4 de 5 de una partición independiente (semilla 2024,
   +0.00012).
-- Fue la mejor entrega del equipo en el leaderboard público y mantuvo el
-  tercer lugar en el privado.
+- Fue la mejor entrega del equipo en el leaderboard público y en el
+  privado (AUC privado 0.86509), con la que el equipo obtuvo el 2.º lugar
+  final (detalle en `docs/modelo_ganador.md`).
 
 ## Consecuencias
 
